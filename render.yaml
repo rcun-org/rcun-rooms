@@ -1,0 +1,24 @@
+# Render Blueprint for rcun-rooms
+# Deploy: New → Blueprint → Connect rcun-rooms repo
+# Image rcun-org/rcun-rooms must exist on Docker Hub first (pushed by GitHub Actions)
+
+services:
+  - type: web
+    name: rcun-rooms
+    runtime: image
+    image:
+      url: docker.io/rcun-org/rcun-rooms:latest
+
+    plan: free
+
+    envVars:
+      - key: PORT
+        value: 5004
+      - key: NODE_ENV
+        value: production
+      - key: ROOMS_DATABASE_URL
+        sync: false
+      - key: AUTH_JWT_SECRET
+        sync: false
+
+    healthCheckPath: /rooms/health/liveness

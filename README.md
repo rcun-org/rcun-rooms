@@ -65,3 +65,14 @@ Alias для rcun-web: /api/room, /api/room/:id
 docker build -t rcun-rooms .
 docker run -p 5004:5004 --env-file .env rcun-rooms
 ```
+
+## Docker Hub и Render
+
+**Docker Hub:** при пуше в `main` GitHub Actions собирает образ и пушит `rcun-org/rcun-rooms:latest`.
+
+**Секреты GitHub (Settings → Secrets):**
+- `DOCKER_USER` — логин Docker Hub
+- `DOCKER_PASS` — пароль или токен Docker Hub
+- `RENDER_DEPLOY_HOOK_URL` — deploy hook из Render (Settings → Deploy Hook)
+
+**Render:** New → Web Service → Existing Image → `rcun-org/rcun-rooms:latest`. Либо Blueprint: New → Blueprint → подключить rcun-rooms → Render прочитает `render.yaml`. Указать `ROOMS_DATABASE_URL` и `AUTH_JWT_SECRET` в Environment.
