@@ -1,0 +1,18 @@
+services:
+  rcun-rooms:
+    build: .
+    container_name: rcun-rooms
+    restart: unless-stopped
+    ports:
+      - "5004:5004"
+    env_file:
+      - .env
+    environment:
+      - PORT=5004
+      - ROOMS_DATABASE_URL=${ROOMS_DATABASE_URL}
+      - AUTH_JWT_SECRET=${AUTH_JWT_SECRET}
+    healthcheck:
+      test: ["CMD", "node", "-e", "const p=process.env.PORT||5004;require('http').get('http://localhost:'+p+'/rooms/health/liveness',(r)=>process.exit(r.statusCode===200?0:1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

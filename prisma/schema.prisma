@@ -1,0 +1,53 @@
+// Prisma Schema for RCUN Rooms Microservice (M4)
+// Database: PostgreSQL (Neon) - can share DB with rcun-auth, different tables
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("ROOMS_DATABASE_URL")
+}
+
+// ROOMS_DATABASE_URL can be same as AUTH_DATABASE_URL for shared Neon DB
+// e.g. ROOMS_DATABASE_URL=${AUTH_DATABASE_URL}
+
+// ============================================
+// Room Model (from rcun-server-node/backend/room/room.model.js)
+// ============================================
+model Room {
+  id                   String   @id @default(uuid()) @db.Uuid
+  title                String   @db.VarChar(48)
+  ownerId              String   @map("owner_id") @db.Uuid // External User ID from rcun-auth
+  backupVideo          String   @default("") @map("backup_video") @db.Text
+  backupVideoTimestamp Float    @default(0) @map("backup_video_timestamp")
+  backupPlayerState    Json     @default("{\"mode\":\"youtube\",\"url\":\"\",\"status\":\"paused\"}") @map("backup_player_state") @db.JsonB
+  backupChatHistory    String   @default("{}") @map("backup_chat_history") @db.Text
+  accessMode           String   @default("public") @map("access_mode") @db.VarChar(20)
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  members RoomMember[]
+
+  @@map("rooms")
+}
+
+// ============================================
+// RoomMember Model (for invite functionality)
+// ============================================
+model RoomMember {
+  id        String   @id @default(uuid()) @db.Uuid
+  roomId    String   @map("room_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid // External User ID from rcun-auth
+  role      String   @default("member") @db.VarChar(20) // owner, moderator, member
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@map("room_members")
+}
