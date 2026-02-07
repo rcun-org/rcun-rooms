@@ -1,13 +1,13 @@
 # Render Blueprint for rcun-rooms
 # Deploy: New → Blueprint → Connect rcun-rooms repo
-# Image rcun-org/rcun-rooms must exist on Docker Hub first (pushed by GitHub Actions)
+# Image maksat1/rcun-rooms must exist on Docker Hub first (pushed by GitHub Actions)
 
 services:
   - type: web
     name: rcun-rooms
     runtime: image
     image:
-      url: docker.io/rcun-org/rcun-rooms:latest
+      url: docker.io/maksat1/rcun-rooms:latest
 
     plan: free
 

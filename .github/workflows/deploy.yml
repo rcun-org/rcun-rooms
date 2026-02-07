@@ -25,8 +25,8 @@ jobs:
           context: .
           push: true
           tags: |
-            rcun-org/rcun-rooms:latest
-            rcun-org/rcun-rooms:${{ github.sha }}
+            maksat1/rcun-rooms:latest
+            maksat1/rcun-rooms:${{ github.sha }}
           platforms: linux/amd64
 
   deploy:
