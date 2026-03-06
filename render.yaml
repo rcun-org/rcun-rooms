@@ -12,8 +12,6 @@ services:
     plan: free
 
     envVars:
-      - key: PORT
-        value: 5004
       - key: NODE_ENV
         value: production
       - key: ROOMS_DATABASE_URL
