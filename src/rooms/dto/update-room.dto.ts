@@ -17,7 +17,10 @@ export class UpdateRoomDto {
   @IsOptional()
   backupVideoTimestamp?: number;
 
-  @ApiPropertyOptional({ description: 'Player state', example: { mode: 'youtube', url: '', status: 'paused' } })
+  @ApiPropertyOptional({
+    description: 'Player state',
+    example: { mode: 'youtube', url: '', status: 'paused' },
+  })
   @IsObject()
   @IsOptional()
   backupPlayerState?: Record<string, unknown>;

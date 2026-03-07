@@ -27,7 +27,9 @@ async function bootstrap() {
   if (enableSwagger) {
     const config = new DocumentBuilder()
       .setTitle('RCUN Rooms API')
-      .setDescription('Rooms Microservice (M4) — комнаты для совместного просмотра')
+      .setDescription(
+        'Rooms Microservice (M4) — комнаты для совместного просмотра',
+      )
       .setVersion('1.0')
       .addBearerAuth(
         {
@@ -51,7 +53,9 @@ async function bootstrap() {
   const port = process.env.PORT || 5004;
   await app.listen(port);
 
-  console.log(`🚀 Rooms Microservice (M4) is running on: http://localhost:${port}`);
+  console.log(
+    `🚀 Rooms Microservice (M4) is running on: http://localhost:${port}`,
+  );
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   if (enableSwagger) {
     console.log(`📖 Swagger UI: http://localhost:${port}/api/docs`);
