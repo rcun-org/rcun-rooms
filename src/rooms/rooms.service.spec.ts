@@ -16,6 +16,10 @@ describe('RoomsService', () => {
       create: jest.fn(),
       upsert: jest.fn(),
     },
+    roomMessage: {
+      findMany: jest.fn(),
+      create: jest.fn(),
+    },
   };
 
   const room = {
@@ -31,6 +35,7 @@ describe('RoomsService', () => {
     },
     backupChatHistory: '{}',
     accessMode: 'public',
+    lifecycleStatus: 'ready',
     createdAt: new Date('2024-02-07T00:00:00.000Z'),
     updatedAt: new Date('2024-02-07T00:00:00.000Z'),
     members: [],
@@ -47,6 +52,7 @@ describe('RoomsService', () => {
     const result = await service.findAll();
 
     expect(prisma.room.findMany).toHaveBeenCalledWith({
+      where: { lifecycleStatus: 'ready' },
       orderBy: { createdAt: 'desc' },
       include: { members: true },
     });
@@ -133,6 +139,36 @@ describe('RoomsService', () => {
         role: 'member',
       },
       update: {},
+    });
+  });
+
+  it('adds messages to an existing draft room', async () => {
+    const message = {
+      id: '880e8400-e29b-41d4-a716-446655440000',
+      roomId: room.id,
+      authorId: room.ownerId,
+      authorName: 'owner',
+      text: 'Pick a movie',
+      createdAt: new Date('2024-02-07T00:00:00.000Z'),
+    };
+    prisma.room.findUnique.mockResolvedValue({ id: room.id });
+    prisma.roomMessage.create.mockResolvedValue(message);
+
+    await expect(
+      service.addMessage(
+        room.id,
+        { userId: room.ownerId, username: 'owner' },
+        { text: '  Pick a movie  ' },
+      ),
+    ).resolves.toEqual(message);
+
+    expect(prisma.roomMessage.create).toHaveBeenCalledWith({
+      data: {
+        roomId: room.id,
+        authorId: room.ownerId,
+        authorName: 'owner',
+        text: 'Pick a movie',
+      },
     });
   });
 });

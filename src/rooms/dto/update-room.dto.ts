@@ -1,4 +1,10 @@
-import { IsOptional, IsNumber, IsObject, IsString } from 'class-validator';
+import {
+  IsIn,
+  IsOptional,
+  IsNumber,
+  IsObject,
+  IsString,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateRoomDto {
@@ -29,4 +35,12 @@ export class UpdateRoomDto {
   @IsString()
   @IsOptional()
   backupChatHistory?: string;
+
+  @ApiPropertyOptional({
+    description: 'Room lifecycle state',
+    enum: ['draft', 'ready'],
+  })
+  @IsIn(['draft', 'ready'])
+  @IsOptional()
+  lifecycleStatus?: 'draft' | 'ready';
 }

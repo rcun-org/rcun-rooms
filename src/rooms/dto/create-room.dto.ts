@@ -1,4 +1,10 @@
-import { IsString, IsOptional, MaxLength, MinLength } from 'class-validator';
+import {
+  IsIn,
+  IsString,
+  IsOptional,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateRoomDto {
@@ -27,4 +33,13 @@ export class CreateRoomDto {
   @IsString()
   @IsOptional()
   imdb?: string;
+
+  @ApiPropertyOptional({
+    description: 'Room lifecycle state',
+    enum: ['draft', 'ready'],
+    default: 'ready',
+  })
+  @IsIn(['draft', 'ready'])
+  @IsOptional()
+  lifecycleStatus?: 'draft' | 'ready';
 }

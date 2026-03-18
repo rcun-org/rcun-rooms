@@ -7,6 +7,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
+import { AddChatMessageDto } from './dto/add-chat-message.dto';
 
 @Injectable()
 export class RoomsService {
@@ -14,6 +15,7 @@ export class RoomsService {
 
   async findAll() {
     const rooms = await this.prisma.room.findMany({
+      where: { lifecycleStatus: 'ready' },
       orderBy: { createdAt: 'desc' },
       include: { members: true },
     });
@@ -48,6 +50,7 @@ export class RoomsService {
         },
         backupChatHistory: '{}',
         accessMode: 'public',
+        lifecycleStatus: dto.lifecycleStatus ?? 'ready',
       },
       include: { members: true },
     });
@@ -80,6 +83,7 @@ export class RoomsService {
         backupVideoTimestamp: dto.backupVideoTimestamp,
         backupPlayerState: dto.backupPlayerState as object,
         backupChatHistory: dto.backupChatHistory,
+        lifecycleStatus: dto.lifecycleStatus,
       },
       include: { members: true },
     });
@@ -123,6 +127,44 @@ export class RoomsService {
     return this.findById(roomId);
   }
 
+  async listMessages(roomId: string) {
+    await this.requireRoom(roomId);
+
+    return this.prisma.roomMessage.findMany({
+      where: { roomId },
+      orderBy: { createdAt: 'asc' },
+      take: 200,
+    });
+  }
+
+  async addMessage(
+    roomId: string,
+    author: { userId: string; username: string },
+    dto: AddChatMessageDto,
+  ) {
+    await this.requireRoom(roomId);
+
+    return this.prisma.roomMessage.create({
+      data: {
+        roomId,
+        authorId: author.userId,
+        authorName: author.username,
+        text: dto.text.trim(),
+      },
+    });
+  }
+
+  private async requireRoom(id: string) {
+    const room = await this.prisma.room.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+  }
+
   private toResponse(room: {
     id: string;
     title: string;
@@ -132,6 +174,7 @@ export class RoomsService {
     backupPlayerState: Prisma.JsonValue;
     backupChatHistory: string;
     accessMode: string;
+    lifecycleStatus: string;
     createdAt: Date;
     updatedAt: Date;
   }) {
@@ -146,6 +189,7 @@ export class RoomsService {
       backupPlayerState: room.backupPlayerState,
       backupChatHistory: room.backupChatHistory,
       accessMode: room.accessMode,
+      lifecycleStatus: room.lifecycleStatus,
       createdAt: room.createdAt,
       updatedAt: room.updatedAt,
     };

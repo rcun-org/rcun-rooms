@@ -26,11 +26,13 @@ model Room {
   backupPlayerState    Json     @default("{\"mode\":\"youtube\",\"url\":\"\",\"status\":\"paused\"}") @map("backup_player_state") @db.JsonB
   backupChatHistory    String   @default("{}") @map("backup_chat_history") @db.Text
   accessMode           String   @default("public") @map("access_mode") @db.VarChar(20)
+  lifecycleStatus      String   @default("ready") @map("lifecycle_status") @db.VarChar(20)
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
 
   // Relations
-  members RoomMember[]
+  members  RoomMember[]
+  messages RoomMessage[]
 
   @@map("rooms")
 }
@@ -50,4 +52,18 @@ model RoomMember {
 
   @@unique([roomId, userId])
   @@map("room_members")
+}
+
+model RoomMessage {
+  id         String   @id @default(uuid()) @db.Uuid
+  roomId     String   @map("room_id") @db.Uuid
+  authorId   String   @map("author_id") @db.Uuid // External User ID from rcun-auth
+  authorName String   @map("author_name") @db.VarChar(50)
+  text       String   @db.VarChar(500)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
+  @@map("room_messages")
 }

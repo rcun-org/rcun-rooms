@@ -20,6 +20,7 @@ import {
 import { RoomsService } from './rooms.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
+import { AddChatMessageDto } from './dto/add-chat-message.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('rooms')
@@ -32,6 +33,31 @@ export class RoomsController {
   @ApiResponse({ status: 200, description: 'List of rooms' })
   findAll() {
     return this.roomsService.findAll();
+  }
+
+  @Get(':id/messages')
+  @ApiOperation({ summary: 'Get room chat messages' })
+  @ApiParam({ name: 'id', description: 'Room UUID' })
+  @ApiResponse({ status: 200, description: 'Room chat history' })
+  @ApiResponse({ status: 404, description: 'Room not found' })
+  listMessages(@Param('id') id: string) {
+    return this.roomsService.listMessages(id);
+  }
+
+  @Post(':id/messages')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Add room chat message' })
+  @ApiParam({ name: 'id', description: 'Room UUID' })
+  @ApiResponse({ status: 201, description: 'Chat message added' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Room not found' })
+  addMessage(
+    @Param('id') id: string,
+    @Req() req: { user: { userId: string; username: string } },
+    @Body() dto: AddChatMessageDto,
+  ) {
+    return this.roomsService.addMessage(id, req.user, dto);
   }
 
   @Get(':id')
