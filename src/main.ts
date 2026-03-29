@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { attachPlaybackWebSocketServer } from './playback/playback-websocket-server';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -52,9 +53,13 @@ async function bootstrap() {
 
   const port = process.env.PORT || 5004;
   await app.listen(port);
+  attachPlaybackWebSocketServer(app.getHttpServer());
 
   console.log(
     `🚀 Rooms Microservice (M4) is running on: http://localhost:${port}`,
+  );
+  console.log(
+    `🎬 Playback WebSocket: ws://localhost:${port}/rooms/playback/ws`,
   );
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   if (enableSwagger) {

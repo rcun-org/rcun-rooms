@@ -35,10 +35,10 @@ docker run -p 5004:5004 --env-file .env rcun-rooms
 ## Запуск локально (опционально)
 
 ```bash
-npm install
-npx prisma generate
-npx prisma migrate deploy
-npm run start:dev
+bun install
+bun run prisma:generate
+bun run prisma:migrate:prod
+bun run start:dev
 ```
 
 Сервис будет доступен на http://localhost:5004
@@ -53,6 +53,13 @@ npm run start:dev
 - PATCH /rooms/:roomId/invite/:userId — пригласить (JWT, owner)
 
 Alias для rcun-web: /api/room, /api/room/:id
+
+## Playback WebSocket
+
+- WS /rooms/playback/ws — синхронизация play, pause и seek внутри комнаты
+- Scheduler отправляет каждому клиенту локальный timestamp исполнения команды
+- Клиент периодически измеряет смещение часов NTP-подобными sample-запросами
+- Последнее состояние комнаты хранится в памяти для подключения опоздавших участников
 
 ## Health
 
