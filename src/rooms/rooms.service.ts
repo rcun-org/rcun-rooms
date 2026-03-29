@@ -48,6 +48,20 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     return rooms.map(this.toResponse);
   }
 
+  async findMine(ownerId: string) {
+    await this.cleanupExpiredDrafts();
+
+    const rooms = await this.prisma.room.findMany({
+      where: {
+        ownerId,
+        lifecycleStatus: 'ready',
+      },
+      orderBy: { createdAt: 'desc' },
+      include: { members: true },
+    });
+    return rooms.map(this.toResponse);
+  }
+
   async findById(id: string) {
     await this.cleanupExpiredDrafts();
 

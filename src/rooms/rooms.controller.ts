@@ -35,6 +35,16 @@ export class RoomsController {
     return this.roomsService.findAll();
   }
 
+  @Get('mine')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Get rooms owned by current user' })
+  @ApiResponse({ status: 200, description: 'List of owned rooms' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  findMine(@Req() req: { user: { userId: string } }) {
+    return this.roomsService.findMine(req.user.userId);
+  }
+
   @Get('shared/:hash/messages')
   @ApiOperation({ summary: 'Get room chat messages by share hash' })
   @ApiParam({ name: 'hash', description: 'Room share hash' })

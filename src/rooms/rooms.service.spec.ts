@@ -73,6 +73,24 @@ describe('RoomsService', () => {
     ]);
   });
 
+  it('returns ready rooms owned by a user including private rooms', async () => {
+    prisma.room.findMany.mockResolvedValue([room]);
+
+    const result = await service.findMine(room.ownerId);
+
+    expect(prisma.room.findMany).toHaveBeenCalledWith({
+      where: { ownerId: room.ownerId, lifecycleStatus: 'ready' },
+      orderBy: { createdAt: 'desc' },
+      include: { members: true },
+    });
+    expect(result).toEqual([
+      expect.objectContaining({
+        id: room.id,
+        ownerId: room.ownerId,
+      }),
+    ]);
+  });
+
   it('creates a room and owner membership', async () => {
     prisma.room.create.mockResolvedValue(room);
     prisma.roomMember.create.mockResolvedValue({
