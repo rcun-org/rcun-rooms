@@ -2,20 +2,46 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  OnModuleDestroy,
+  OnModuleInit,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
 import { AddChatMessageDto } from './dto/add-chat-message.dto';
 
 @Injectable()
-export class RoomsService {
+export class RoomsService implements OnModuleInit, OnModuleDestroy {
+  private readonly draftLifetimeMs = 45 * 60 * 1000;
+  private readonly cleanupIntervalMs = 60 * 1000;
+  private cleanupTimer?: ReturnType<typeof setInterval>;
+
   constructor(private prisma: PrismaService) {}
 
+  onModuleInit() {
+    void this.cleanupExpiredDrafts().catch(() => undefined);
+    this.cleanupTimer = setInterval(() => {
+      void this.cleanupExpiredDrafts().catch(() => undefined);
+    }, this.cleanupIntervalMs);
+    this.cleanupTimer.unref();
+  }
+
+  onModuleDestroy() {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+    }
+  }
+
   async findAll() {
+    await this.cleanupExpiredDrafts();
+
     const rooms = await this.prisma.room.findMany({
-      where: { lifecycleStatus: 'ready' },
+      where: {
+        lifecycleStatus: 'ready',
+        accessMode: 'public',
+      },
       orderBy: { createdAt: 'desc' },
       include: { members: true },
     });
@@ -23,6 +49,8 @@ export class RoomsService {
   }
 
   async findById(id: string) {
+    await this.cleanupExpiredDrafts();
+
     const room = await this.prisma.room.findUnique({
       where: { id },
       include: { members: true },
@@ -33,12 +61,24 @@ export class RoomsService {
     return this.toResponse(room);
   }
 
+  async findByShareHash(hash: string) {
+    const roomId = await this.findRoomIdByShareHash(hash);
+    return this.findById(roomId);
+  }
+
   async create(ownerId: string, dto: CreateRoomDto) {
+    await this.cleanupExpiredDrafts();
+
+    const id = randomUUID();
     const videoUrl = dto.videoUrl ?? '';
     const playerMode = dto.playerMode ?? 'youtube';
+    const lifecycleStatus = dto.lifecycleStatus ?? 'ready';
+    const passwordDigest = this.createPasswordDigest(dto.roomPassword);
+    const shareHash = this.createShareHash(id, dto.title, passwordDigest);
 
     const room = await this.prisma.room.create({
       data: {
+        id,
         title: dto.title,
         ownerId,
         backupVideo: videoUrl,
@@ -49,8 +89,17 @@ export class RoomsService {
           status: 'paused',
         },
         backupChatHistory: '{}',
-        accessMode: 'public',
-        lifecycleStatus: dto.lifecycleStatus ?? 'ready',
+        accessMode: dto.accessMode ?? 'public',
+        lifecycleStatus,
+        shareHash,
+        passwordDigest,
+        draftExpiresAt:
+          lifecycleStatus === 'draft' ? this.createDraftExpiry() : null,
+        shareLinks: {
+          create: {
+            hash: shareHash,
+          },
+        },
       },
       include: { members: true },
     });
@@ -75,6 +124,17 @@ export class RoomsService {
       throw new ForbiddenException('Only owner can update room');
     }
 
+    const lifecycleStatus = dto.lifecycleStatus ?? room.lifecycleStatus;
+    const passwordDigest =
+      dto.roomPassword === undefined
+        ? room.passwordDigest
+        : this.createPasswordDigest(dto.roomPassword);
+    const shareHash = this.createShareHash(
+      room.id,
+      dto.title ?? room.title,
+      passwordDigest,
+    );
+
     const updated = await this.prisma.room.update({
       where: { id },
       data: {
@@ -83,7 +143,21 @@ export class RoomsService {
         backupVideoTimestamp: dto.backupVideoTimestamp,
         backupPlayerState: dto.backupPlayerState as object,
         backupChatHistory: dto.backupChatHistory,
-        lifecycleStatus: dto.lifecycleStatus,
+        accessMode: dto.accessMode,
+        lifecycleStatus,
+        shareHash,
+        passwordDigest,
+        draftExpiresAt:
+          lifecycleStatus === 'draft'
+            ? (room.draftExpiresAt ?? this.createDraftExpiry())
+            : null,
+        shareLinks: {
+          upsert: {
+            where: { hash: shareHash },
+            create: { hash: shareHash },
+            update: {},
+          },
+        },
       },
       include: { members: true },
     });
@@ -154,7 +228,63 @@ export class RoomsService {
     });
   }
 
+  async listMessagesByShareHash(hash: string) {
+    const roomId = await this.findRoomIdByShareHash(hash);
+    return this.listMessages(roomId);
+  }
+
+  async addMessageByShareHash(
+    hash: string,
+    author: { userId: string; username: string },
+    dto: AddChatMessageDto,
+  ) {
+    const roomId = await this.findRoomIdByShareHash(hash);
+    return this.addMessage(roomId, author, dto);
+  }
+
+  private async cleanupExpiredDrafts() {
+    await this.prisma.room.deleteMany({
+      where: {
+        lifecycleStatus: 'draft',
+        draftExpiresAt: {
+          lte: new Date(),
+        },
+      },
+    });
+  }
+
+  private async findRoomIdByShareHash(hash: string) {
+    await this.cleanupExpiredDrafts();
+
+    const link = await this.prisma.roomShareLink.findUnique({
+      where: { hash },
+      select: { roomId: true },
+    });
+
+    if (!link) {
+      throw new NotFoundException('Room not found');
+    }
+
+    return link.roomId;
+  }
+
+  private createDraftExpiry() {
+    return new Date(Date.now() + this.draftLifetimeMs);
+  }
+
+  private createPasswordDigest(password = '') {
+    return createHash('sha256').update(password).digest('hex');
+  }
+
+  private createShareHash(id: string, title: string, passwordDigest: string) {
+    return createHash('sha256')
+      .update(`${title.trim().toLowerCase()}\0${passwordDigest}\0${id}`)
+      .digest('hex');
+  }
+
   private async requireRoom(id: string) {
+    await this.cleanupExpiredDrafts();
+
     const room = await this.prisma.room.findUnique({
       where: { id },
       select: { id: true },
@@ -175,6 +305,8 @@ export class RoomsService {
     backupChatHistory: string;
     accessMode: string;
     lifecycleStatus: string;
+    shareHash: string;
+    draftExpiresAt: Date | null;
     createdAt: Date;
     updatedAt: Date;
   }) {
@@ -190,6 +322,8 @@ export class RoomsService {
       backupChatHistory: room.backupChatHistory,
       accessMode: room.accessMode,
       lifecycleStatus: room.lifecycleStatus,
+      shareHash: room.shareHash,
+      draftExpiresAt: room.draftExpiresAt,
       createdAt: room.createdAt,
       updatedAt: room.updatedAt,
     };

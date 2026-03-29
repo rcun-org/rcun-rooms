@@ -1,10 +1,4 @@
-import {
-  IsIn,
-  IsOptional,
-  IsNumber,
-  IsObject,
-  IsString,
-} from 'class-validator';
+import { IsIn, IsOptional, IsNumber, IsObject, IsString, MaxLength } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateRoomDto {
@@ -43,4 +37,18 @@ export class UpdateRoomDto {
   @IsIn(['draft', 'ready'])
   @IsOptional()
   lifecycleStatus?: 'draft' | 'ready';
+
+  @ApiPropertyOptional({
+    description: 'Room visibility',
+    enum: ['public', 'private'],
+  })
+  @IsIn(['public', 'private'])
+  @IsOptional()
+  accessMode?: 'public' | 'private';
+
+  @ApiPropertyOptional({ description: 'Room password', maxLength: 32 })
+  @IsString()
+  @MaxLength(32, { message: 'Password must be at most 32 characters' })
+  @IsOptional()
+  roomPassword?: string;
 }

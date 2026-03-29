@@ -11,6 +11,7 @@ describe('RoomsService', () => {
       create: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
+      deleteMany: jest.fn(),
     },
     roomMember: {
       create: jest.fn(),
@@ -19,6 +20,9 @@ describe('RoomsService', () => {
     roomMessage: {
       findMany: jest.fn(),
       create: jest.fn(),
+    },
+    roomShareLink: {
+      findUnique: jest.fn(),
     },
   };
 
@@ -36,6 +40,9 @@ describe('RoomsService', () => {
     backupChatHistory: '{}',
     accessMode: 'public',
     lifecycleStatus: 'ready',
+    shareHash: 'room-share-hash',
+    passwordDigest: 'password-digest',
+    draftExpiresAt: null,
     createdAt: new Date('2024-02-07T00:00:00.000Z'),
     updatedAt: new Date('2024-02-07T00:00:00.000Z'),
     members: [],
@@ -52,7 +59,7 @@ describe('RoomsService', () => {
     const result = await service.findAll();
 
     expect(prisma.room.findMany).toHaveBeenCalledWith({
-      where: { lifecycleStatus: 'ready' },
+      where: { lifecycleStatus: 'ready', accessMode: 'public' },
       orderBy: { createdAt: 'desc' },
       include: { members: true },
     });
@@ -86,6 +93,14 @@ describe('RoomsService', () => {
           title: room.title,
           ownerId: room.ownerId,
           backupVideo: room.backupVideo,
+          accessMode: 'public',
+          lifecycleStatus: 'ready',
+          shareHash: expect.any(String),
+          shareLinks: {
+            create: {
+              hash: expect.any(String),
+            },
+          },
         }),
         include: { members: true },
       }),
@@ -169,6 +184,23 @@ describe('RoomsService', () => {
         authorName: 'owner',
         text: 'Pick a movie',
       },
+    });
+  });
+
+  it('resolves a room through its share hash alias', async () => {
+    prisma.roomShareLink.findUnique.mockResolvedValue({ roomId: room.id });
+    prisma.room.findUnique.mockResolvedValue(room);
+
+    await expect(service.findByShareHash(room.shareHash)).resolves.toEqual(
+      expect.objectContaining({
+        id: room.id,
+        shareHash: room.shareHash,
+      }),
+    );
+
+    expect(prisma.roomShareLink.findUnique).toHaveBeenCalledWith({
+      where: { hash: room.shareHash },
+      select: { roomId: true },
     });
   });
 });

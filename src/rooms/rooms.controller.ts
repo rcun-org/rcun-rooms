@@ -35,6 +35,40 @@ export class RoomsController {
     return this.roomsService.findAll();
   }
 
+  @Get('shared/:hash/messages')
+  @ApiOperation({ summary: 'Get room chat messages by share hash' })
+  @ApiParam({ name: 'hash', description: 'Room share hash' })
+  @ApiResponse({ status: 200, description: 'Room chat history' })
+  @ApiResponse({ status: 404, description: 'Room not found' })
+  listMessagesByShareHash(@Param('hash') hash: string) {
+    return this.roomsService.listMessagesByShareHash(hash);
+  }
+
+  @Post('shared/:hash/messages')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Add room chat message by share hash' })
+  @ApiParam({ name: 'hash', description: 'Room share hash' })
+  @ApiResponse({ status: 201, description: 'Chat message added' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Room not found' })
+  addMessageByShareHash(
+    @Param('hash') hash: string,
+    @Req() req: { user: { userId: string; username: string } },
+    @Body() dto: AddChatMessageDto,
+  ) {
+    return this.roomsService.addMessageByShareHash(hash, req.user, dto);
+  }
+
+  @Get('shared/:hash')
+  @ApiOperation({ summary: 'Get room by share hash' })
+  @ApiParam({ name: 'hash', description: 'Room share hash' })
+  @ApiResponse({ status: 200, description: 'Room found' })
+  @ApiResponse({ status: 404, description: 'Room not found' })
+  findByShareHash(@Param('hash') hash: string) {
+    return this.roomsService.findByShareHash(hash);
+  }
+
   @Get(':id/messages')
   @ApiOperation({ summary: 'Get room chat messages' })
   @ApiParam({ name: 'id', description: 'Room UUID' })

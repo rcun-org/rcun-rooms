@@ -27,12 +27,16 @@ model Room {
   backupChatHistory    String   @default("{}") @map("backup_chat_history") @db.Text
   accessMode           String   @default("public") @map("access_mode") @db.VarChar(20)
   lifecycleStatus      String   @default("ready") @map("lifecycle_status") @db.VarChar(20)
+  shareHash            String   @unique @map("share_hash") @db.VarChar(64)
+  passwordDigest       String   @default("") @map("password_digest") @db.VarChar(64)
+  draftExpiresAt       DateTime? @map("draft_expires_at")
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
 
   // Relations
-  members  RoomMember[]
-  messages RoomMessage[]
+  members    RoomMember[]
+  messages   RoomMessage[]
+  shareLinks RoomShareLink[]
 
   @@map("rooms")
 }
@@ -66,4 +70,16 @@ model RoomMessage {
 
   @@index([roomId, createdAt])
   @@map("room_messages")
+}
+
+model RoomShareLink {
+  id        String   @id @default(uuid()) @db.Uuid
+  roomId    String   @map("room_id") @db.Uuid
+  hash      String   @unique @db.VarChar(64)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+  @@map("room_share_links")
 }
