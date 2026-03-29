@@ -53,13 +53,13 @@ describe('RoomsService', () => {
     service = new RoomsService(prisma as any);
   });
 
-  it('returns rooms in legacy-compatible response shape', async () => {
+  it('returns public ready rooms and drafts in legacy-compatible response shape', async () => {
     prisma.room.findMany.mockResolvedValue([room]);
 
     const result = await service.findAll();
 
     expect(prisma.room.findMany).toHaveBeenCalledWith({
-      where: { lifecycleStatus: 'ready', accessMode: 'public' },
+      where: { accessMode: 'public' },
       orderBy: { createdAt: 'desc' },
       include: { members: true },
     });
