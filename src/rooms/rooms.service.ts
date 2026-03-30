@@ -29,6 +29,11 @@ type RoomWithMembers = {
   draftExpiresAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  members: Array<{
+    userId: string;
+    role: string;
+    createdAt: Date;
+  }>;
 };
 
 @Injectable()
@@ -168,7 +173,16 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    return this.toResponse(room);
+    const createdRoom = await this.prisma.room.findUnique({
+      where: { id: room.id },
+      include: { members: true },
+    });
+
+    if (!createdRoom) {
+      throw new NotFoundException('Room not found');
+    }
+
+    return this.toResponse(createdRoom);
   }
 
   async update(id: string, userId: string, dto: UpdateRoomDto) {
@@ -533,6 +547,12 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       draftExpiresAt: room.draftExpiresAt,
       createdAt: room.createdAt,
       updatedAt: room.updatedAt,
+      memberCount: room.members.length,
+      members: room.members.map((member) => ({
+        createdAt: member.createdAt,
+        role: member.role,
+        userId: member.userId,
+      })),
     };
   }
 }

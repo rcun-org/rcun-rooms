@@ -76,6 +76,8 @@ describe('RoomsService', () => {
         _id: room.id,
         ownerId: room.ownerId,
         owner: { _id: room.ownerId, id: room.ownerId },
+        memberCount: 0,
+        members: [],
       }),
     ]);
   });
@@ -94,12 +96,60 @@ describe('RoomsService', () => {
       expect.objectContaining({
         id: room.id,
         ownerId: room.ownerId,
+        memberCount: 0,
+        members: [],
       }),
     ]);
   });
 
+  it('returns room members with roles in the room response', async () => {
+    const roomWithMembers = {
+      ...room,
+      members: [
+        {
+          userId: room.ownerId,
+          role: 'owner',
+          createdAt: new Date('2024-02-07T00:00:00.000Z'),
+        },
+        {
+          userId: '770e8400-e29b-41d4-a716-446655440000',
+          role: 'member',
+          createdAt: new Date('2024-02-07T00:02:00.000Z'),
+        },
+      ],
+    };
+    prisma.room.findUnique.mockResolvedValue(roomWithMembers);
+
+    await expect(service.findById(room.id)).resolves.toEqual(
+      expect.objectContaining({
+        id: room.id,
+        memberCount: 2,
+        members: [
+          expect.objectContaining({
+            role: 'owner',
+            userId: room.ownerId,
+          }),
+          expect.objectContaining({
+            role: 'member',
+            userId: '770e8400-e29b-41d4-a716-446655440000',
+          }),
+        ],
+      }),
+    );
+  });
+
   it('creates a room and owner membership', async () => {
     prisma.room.create.mockResolvedValue(room);
+    prisma.room.findUnique.mockResolvedValue({
+      ...room,
+      members: [
+        {
+          userId: room.ownerId,
+          role: 'owner',
+          createdAt: new Date('2024-02-07T00:00:00.000Z'),
+        },
+      ],
+    });
     prisma.roomMember.create.mockResolvedValue({
       roomId: room.id,
       userId: room.ownerId,
@@ -137,7 +187,18 @@ describe('RoomsService', () => {
         role: 'owner',
       },
     });
-    expect(result).toEqual(expect.objectContaining({ id: room.id }));
+    expect(result).toEqual(
+      expect.objectContaining({
+        id: room.id,
+        memberCount: 1,
+        members: [
+          expect.objectContaining({
+            role: 'owner',
+            userId: room.ownerId,
+          }),
+        ],
+      }),
+    );
   });
 
   it('blocks updates from non-owners', async () => {
