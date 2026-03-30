@@ -36,6 +36,7 @@ model Room {
   // Relations
   members    RoomMember[]
   messages   RoomMessage[]
+  queueItems RoomQueueItem[]
   shareLinks RoomShareLink[]
 
   @@map("rooms")
@@ -82,4 +83,22 @@ model RoomShareLink {
 
   @@index([roomId])
   @@map("room_share_links")
+}
+
+model RoomQueueItem {
+  id          String   @id @default(uuid()) @db.Uuid
+  roomId      String   @map("room_id") @db.Uuid
+  title       String   @db.VarChar(160)
+  videoUrl    String   @map("video_url") @db.Text
+  poster      String   @default("") @db.Text
+  kind        String   @default("Long") @db.VarChar(32)
+  duration    String   @default("Queued") @db.VarChar(64)
+  position    Int
+  createdById String   @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, position])
+  @@map("room_queue_items")
 }

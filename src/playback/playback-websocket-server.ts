@@ -46,6 +46,25 @@ type RoomChatMessagePayload = {
   text: string;
 };
 
+type RoomQueueItemPayload = {
+  createdAt: string;
+  createdById: string;
+  duration: string;
+  id: string;
+  kind: string;
+  position: number;
+  poster: string;
+  roomId: string;
+  title: string;
+  videoUrl: string;
+};
+
+type RoomVideoUpdatePayload = {
+  queue: RoomQueueItemPayload[];
+  room: Record<string, unknown>;
+  skippedItem: RoomQueueItemPayload | null;
+};
+
 function asFiniteNumber(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
@@ -94,6 +113,76 @@ function asChatMessagePayload(value: unknown): RoomChatMessagePayload | null {
   }
 
   return payload;
+}
+
+function asQueueItemPayload(value: unknown): RoomQueueItemPayload | null {
+  const item = asRecord(value);
+
+  if (!item) {
+    return null;
+  }
+
+  const position = asFiniteNumber(item.position);
+  const payload = {
+    createdAt: asString(item.createdAt),
+    createdById: asString(item.createdById),
+    duration: asString(item.duration),
+    id: asString(item.id),
+    kind: asString(item.kind),
+    position: position === null ? -1 : Math.max(0, Math.round(position)),
+    poster: asString(item.poster),
+    roomId: asString(item.roomId),
+    title: asString(item.title),
+    videoUrl: asString(item.videoUrl),
+  };
+
+  if (
+    !payload.id ||
+    payload.id.length > maxChatFieldLength ||
+    !payload.roomId ||
+    payload.roomId.length > maxChatFieldLength ||
+    !payload.title ||
+    payload.title.length > maxChatFieldLength ||
+    !payload.videoUrl ||
+    payload.position < 0
+  ) {
+    return null;
+  }
+
+  return payload;
+}
+
+function asQueuePayload(value: unknown) {
+  return Array.isArray(value)
+    ? value
+        .map(asQueueItemPayload)
+        .filter((item) => item !== null)
+        .slice(0, 50)
+    : [];
+}
+
+function asVideoUpdatePayload(value: unknown): RoomVideoUpdatePayload | null {
+  const payload = asRecord(value);
+  const room = asRecord(payload?.room);
+
+  if (!payload || !room || (!asString(room.id) && !asString(room.shareHash))) {
+    return null;
+  }
+
+  const skippedItem =
+    payload.skippedItem === null || payload.skippedItem === undefined
+      ? null
+      : asQueueItemPayload(payload.skippedItem);
+
+  if (payload.skippedItem && !skippedItem) {
+    return null;
+  }
+
+  return {
+    queue: asQueuePayload(payload.queue),
+    room,
+    skippedItem,
+  };
 }
 
 function isPlaybackCommand(value: unknown): value is PlaybackCommand {
@@ -171,8 +260,14 @@ export class PlaybackWebSocketServer {
       case 'chat_message_request':
         this.handleChatMessageRequest(client, envelope.data);
         break;
+      case 'queue_update_request':
+        this.handleQueueUpdateRequest(client, envelope.data);
+        break;
       case 'reaction_request':
         this.handleReactionRequest(client, envelope.data);
+        break;
+      case 'video_update_request':
+        this.handleVideoUpdateRequest(client, envelope.data);
         break;
     }
   }
@@ -374,6 +469,62 @@ export class PlaybackWebSocketServer {
       this.send(client, 'reaction_broadcast', {
         emoji,
         reactionId,
+        senderId: sender.id,
+        serverTimeMs,
+      });
+    }
+  }
+
+  private handleQueueUpdateRequest(
+    sender: ClientState,
+    data?: Record<string, unknown>,
+  ) {
+    const queue = asQueuePayload(data?.queue);
+
+    if (!sender.id || !sender.roomId) {
+      return;
+    }
+
+    const serverTimeMs = Date.now();
+
+    for (const client of this.clients) {
+      if (
+        client.id === sender.id ||
+        !this.isActiveRoomClient(client, sender.roomId)
+      ) {
+        continue;
+      }
+
+      this.send(client, 'queue_update_broadcast', {
+        queue,
+        senderId: sender.id,
+        serverTimeMs,
+      });
+    }
+  }
+
+  private handleVideoUpdateRequest(
+    sender: ClientState,
+    data?: Record<string, unknown>,
+  ) {
+    const payload = asVideoUpdatePayload(data);
+
+    if (!sender.id || !sender.roomId || !payload) {
+      return;
+    }
+
+    const serverTimeMs = Date.now();
+
+    for (const client of this.clients) {
+      if (
+        client.id === sender.id ||
+        !this.isActiveRoomClient(client, sender.roomId)
+      ) {
+        continue;
+      }
+
+      this.send(client, 'video_update_broadcast', {
+        ...payload,
         senderId: sender.id,
         serverTimeMs,
       });

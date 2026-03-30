@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
 import { AddChatMessageDto } from './dto/add-chat-message.dto';
+import { AddQueueItemDto } from './dto/add-queue-item.dto';
 
 @Injectable()
 export class RoomsService implements OnModuleInit, OnModuleDestroy {
@@ -253,6 +254,101 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
   ) {
     const roomId = await this.findRoomIdByShareHash(hash);
     return this.addMessage(roomId, author, dto);
+  }
+
+  async listQueue(roomId: string) {
+    await this.requireRoom(roomId);
+
+    return this.prisma.roomQueueItem.findMany({
+      where: { roomId },
+      orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+      take: 50,
+    });
+  }
+
+  async listQueueByShareHash(hash: string) {
+    const roomId = await this.findRoomIdByShareHash(hash);
+    return this.listQueue(roomId);
+  }
+
+  async addQueueItem(roomId: string, userId: string, dto: AddQueueItemDto) {
+    await this.requireRoom(roomId);
+
+    const lastItem = await this.prisma.roomQueueItem.findFirst({
+      where: { roomId },
+      orderBy: { position: 'desc' },
+      select: { position: true },
+    });
+
+    return this.prisma.roomQueueItem.create({
+      data: {
+        roomId,
+        title: dto.title.trim(),
+        videoUrl: dto.videoUrl.trim(),
+        poster: dto.poster?.trim() ?? '',
+        kind: dto.kind?.trim() || 'Long',
+        duration: dto.duration?.trim() || 'Queued',
+        position: (lastItem?.position ?? 0) + 1,
+        createdById: userId,
+      },
+    });
+  }
+
+  async addQueueItemByShareHash(
+    hash: string,
+    userId: string,
+    dto: AddQueueItemDto,
+  ) {
+    const roomId = await this.findRoomIdByShareHash(hash);
+    return this.addQueueItem(roomId, userId, dto);
+  }
+
+  async skipQueueItem(roomId: string) {
+    await this.requireRoom(roomId);
+
+    const nextItem = await this.prisma.roomQueueItem.findFirst({
+      where: { roomId },
+      orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+    });
+
+    if (!nextItem) {
+      return {
+        queue: [],
+        room: await this.findById(roomId),
+        skippedItem: null,
+      };
+    }
+
+    const updatedRoom = await this.prisma.room.update({
+      where: { id: roomId },
+      data: {
+        backupVideo: nextItem.videoUrl,
+        backupVideoTimestamp: 0,
+        backupPlayerState: {
+          duration: nextItem.duration,
+          mode: nextItem.kind.toLowerCase(),
+          status: 'paused',
+          title: nextItem.title,
+          url: nextItem.videoUrl,
+        },
+      },
+      include: { members: true },
+    });
+
+    await this.prisma.roomQueueItem.delete({
+      where: { id: nextItem.id },
+    });
+
+    return {
+      queue: await this.listQueue(roomId),
+      room: this.toResponse(updatedRoom),
+      skippedItem: nextItem,
+    };
+  }
+
+  async skipQueueItemByShareHash(hash: string) {
+    const roomId = await this.findRoomIdByShareHash(hash);
+    return this.skipQueueItem(roomId);
   }
 
   private async cleanupExpiredDrafts() {

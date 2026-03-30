@@ -206,4 +206,101 @@ describe('PlaybackWebSocketServer', () => {
       }),
     );
   });
+
+  it('broadcasts queue updates to other clients in the same room', async () => {
+    const first = await openSocket(port);
+    const second = await openSocket(port);
+    sockets.push(first, second);
+
+    const firstReady = waitForMessage(first, 'client_ready');
+    send(first, 'client_hello', { clientId: 'first', roomId: 'movie-night' });
+    await firstReady;
+
+    const secondReady = waitForMessage(second, 'client_ready');
+    send(second, 'client_hello', { clientId: 'second', roomId: 'movie-night' });
+    await secondReady;
+
+    const queue = [
+      {
+        createdAt: '2026-03-30T19:35:00.000Z',
+        createdById: 'user-1',
+        duration: '2h 46m',
+        id: 'queue-item-1',
+        kind: 'Long',
+        position: 1,
+        poster: 'url(https://example.com/poster.jpg)',
+        roomId: 'room-uuid',
+        title: 'Dune: Part Two',
+        videoUrl: 'https://www.youtube.com/watch?v=test',
+      },
+    ];
+    const queueBroadcast = waitForMessage(second, 'queue_update_broadcast');
+    send(first, 'queue_update_request', { queue });
+
+    await expect(queueBroadcast).resolves.toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          queue,
+          senderId: 'first',
+        }),
+      }),
+    );
+  });
+
+  it('broadcasts current video updates to other clients in the same room', async () => {
+    const first = await openSocket(port);
+    const second = await openSocket(port);
+    sockets.push(first, second);
+
+    const firstReady = waitForMessage(first, 'client_ready');
+    send(first, 'client_hello', { clientId: 'first', roomId: 'movie-night' });
+    await firstReady;
+
+    const secondReady = waitForMessage(second, 'client_ready');
+    send(second, 'client_hello', { clientId: 'second', roomId: 'movie-night' });
+    await secondReady;
+
+    const skippedItem = {
+      createdAt: '2026-03-30T19:35:00.000Z',
+      createdById: 'user-1',
+      duration: '2h 46m',
+      id: 'queue-item-1',
+      kind: 'Long',
+      position: 1,
+      poster: 'url(https://example.com/poster.jpg)',
+      roomId: 'room-uuid',
+      title: 'Dune: Part Two',
+      videoUrl: 'https://www.youtube.com/watch?v=test',
+    };
+    const room = {
+      id: 'room-uuid',
+      shareHash: 'share-hash',
+      title: 'Movie night',
+      backupVideo: skippedItem.videoUrl,
+      backupPlayerState: {
+        duration: skippedItem.duration,
+        mode: 'long',
+        status: 'paused',
+        title: skippedItem.title,
+        url: skippedItem.videoUrl,
+      },
+    };
+    const videoBroadcast = waitForMessage(second, 'video_update_broadcast');
+    send(first, 'video_update_request', {
+      queue: [],
+      room,
+      skippedItem,
+    });
+
+    await expect(videoBroadcast).resolves.toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          queue: [],
+          room,
+          senderId: 'first',
+          skippedItem,
+        }),
+      }),
+    );
+  });
 });

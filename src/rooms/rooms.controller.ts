@@ -21,6 +21,7 @@ import { RoomsService } from './rooms.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
 import { AddChatMessageDto } from './dto/add-chat-message.dto';
+import { AddQueueItemDto } from './dto/add-queue-item.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('rooms')
@@ -70,6 +71,47 @@ export class RoomsController {
     return this.roomsService.addMessageByShareHash(hash, req.user, dto);
   }
 
+  @Get('shared/:hash/queue')
+  @ApiOperation({ summary: 'Get room video queue by share hash' })
+  @ApiParam({ name: 'hash', description: 'Room share hash' })
+  @ApiResponse({ status: 200, description: 'Room queue' })
+  @ApiResponse({ status: 404, description: 'Room not found' })
+  listQueueByShareHash(@Param('hash') hash: string) {
+    return this.roomsService.listQueueByShareHash(hash);
+  }
+
+  @Post('shared/:hash/queue')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Add video to room queue by share hash' })
+  @ApiParam({ name: 'hash', description: 'Room share hash' })
+  @ApiResponse({ status: 201, description: 'Queue item added' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Room not found' })
+  addQueueItemByShareHash(
+    @Param('hash') hash: string,
+    @Req() req: { user: { userId: string } },
+    @Body() dto: AddQueueItemDto,
+  ) {
+    return this.roomsService.addQueueItemByShareHash(
+      hash,
+      req.user.userId,
+      dto,
+    );
+  }
+
+  @Post('shared/:hash/queue/skip')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Skip to next queued video by share hash' })
+  @ApiParam({ name: 'hash', description: 'Room share hash' })
+  @ApiResponse({ status: 201, description: 'Next queued video selected' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Room not found' })
+  skipQueueByShareHash(@Param('hash') hash: string) {
+    return this.roomsService.skipQueueItemByShareHash(hash);
+  }
+
   @Get('shared/:hash')
   @ApiOperation({ summary: 'Get room by share hash' })
   @ApiParam({ name: 'hash', description: 'Room share hash' })
@@ -102,6 +144,43 @@ export class RoomsController {
     @Body() dto: AddChatMessageDto,
   ) {
     return this.roomsService.addMessage(id, req.user, dto);
+  }
+
+  @Get(':id/queue')
+  @ApiOperation({ summary: 'Get room video queue' })
+  @ApiParam({ name: 'id', description: 'Room UUID' })
+  @ApiResponse({ status: 200, description: 'Room queue' })
+  @ApiResponse({ status: 404, description: 'Room not found' })
+  listQueue(@Param('id') id: string) {
+    return this.roomsService.listQueue(id);
+  }
+
+  @Post(':id/queue')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Add video to room queue' })
+  @ApiParam({ name: 'id', description: 'Room UUID' })
+  @ApiResponse({ status: 201, description: 'Queue item added' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Room not found' })
+  addQueueItem(
+    @Param('id') id: string,
+    @Req() req: { user: { userId: string } },
+    @Body() dto: AddQueueItemDto,
+  ) {
+    return this.roomsService.addQueueItem(id, req.user.userId, dto);
+  }
+
+  @Post(':id/queue/skip')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Skip to next queued video' })
+  @ApiParam({ name: 'id', description: 'Room UUID' })
+  @ApiResponse({ status: 201, description: 'Next queued video selected' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Room not found' })
+  skipQueue(@Param('id') id: string) {
+    return this.roomsService.skipQueueItem(id);
   }
 
   @Get(':id')

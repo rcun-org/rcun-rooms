@@ -21,6 +21,12 @@ describe('RoomsService', () => {
       findMany: jest.fn(),
       create: jest.fn(),
     },
+    roomQueueItem: {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      create: jest.fn(),
+      delete: jest.fn(),
+    },
     roomShareLink: {
       findUnique: jest.fn(),
     },
@@ -219,6 +225,93 @@ describe('RoomsService', () => {
     expect(prisma.roomShareLink.findUnique).toHaveBeenCalledWith({
       where: { hash: room.shareHash },
       select: { roomId: true },
+    });
+  });
+
+  it('adds a queue item after the current last position', async () => {
+    const queueItem = {
+      id: '990e8400-e29b-41d4-a716-446655440000',
+      roomId: room.id,
+      title: 'Next movie',
+      videoUrl: 'https://example.com/next',
+      poster: 'linear-gradient(#000,#111)',
+      kind: 'Long',
+      duration: '2h',
+      position: 3,
+      createdById: room.ownerId,
+      createdAt: new Date('2024-02-07T00:00:00.000Z'),
+    };
+    prisma.room.findUnique.mockResolvedValue({ id: room.id });
+    prisma.roomQueueItem.findFirst.mockResolvedValue({ position: 2 });
+    prisma.roomQueueItem.create.mockResolvedValue(queueItem);
+
+    await expect(
+      service.addQueueItem(room.id, room.ownerId, {
+        duration: '2h',
+        kind: 'Long',
+        poster: 'linear-gradient(#000,#111)',
+        title: ' Next movie ',
+        videoUrl: ' https://example.com/next ',
+      }),
+    ).resolves.toEqual(queueItem);
+
+    expect(prisma.roomQueueItem.create).toHaveBeenCalledWith({
+      data: {
+        roomId: room.id,
+        title: 'Next movie',
+        videoUrl: 'https://example.com/next',
+        poster: 'linear-gradient(#000,#111)',
+        kind: 'Long',
+        duration: '2h',
+        position: 3,
+        createdById: room.ownerId,
+      },
+    });
+  });
+
+  it('skips to the next queued item and removes it from the queue', async () => {
+    const queueItem = {
+      id: '990e8400-e29b-41d4-a716-446655440000',
+      roomId: room.id,
+      title: 'Next movie',
+      videoUrl: 'https://example.com/next',
+      poster: '',
+      kind: 'Long',
+      duration: '2h',
+      position: 1,
+      createdById: room.ownerId,
+      createdAt: new Date('2024-02-07T00:00:00.000Z'),
+    };
+    prisma.room.findUnique.mockResolvedValue({ id: room.id });
+    prisma.roomQueueItem.findFirst.mockResolvedValue(queueItem);
+    prisma.room.update.mockResolvedValue({
+      ...room,
+      backupVideo: queueItem.videoUrl,
+      backupPlayerState: {
+        duration: queueItem.duration,
+        mode: 'long',
+        status: 'paused',
+        title: queueItem.title,
+        url: queueItem.videoUrl,
+      },
+    });
+    prisma.roomQueueItem.delete.mockResolvedValue(queueItem);
+    prisma.roomQueueItem.findMany.mockResolvedValue([]);
+
+    await expect(service.skipQueueItem(room.id)).resolves.toEqual({
+      queue: [],
+      room: expect.objectContaining({
+        backupVideo: queueItem.videoUrl,
+        backupPlayerState: expect.objectContaining({
+          title: queueItem.title,
+          url: queueItem.videoUrl,
+        }),
+      }),
+      skippedItem: queueItem,
+    });
+
+    expect(prisma.roomQueueItem.delete).toHaveBeenCalledWith({
+      where: { id: queueItem.id },
     });
   });
 });
