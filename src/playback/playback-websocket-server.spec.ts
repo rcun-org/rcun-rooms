@@ -142,4 +142,34 @@ describe('PlaybackWebSocketServer', () => {
       }),
     );
   });
+
+  it('broadcasts room reactions to other clients in the same room', async () => {
+    const first = await openSocket(port);
+    const second = await openSocket(port);
+    sockets.push(first, second);
+
+    const firstReady = waitForMessage(first, 'client_ready');
+    send(first, 'client_hello', { clientId: 'first', roomId: 'movie-night' });
+    await firstReady;
+
+    const secondReady = waitForMessage(second, 'client_ready');
+    send(second, 'client_hello', { clientId: 'second', roomId: 'movie-night' });
+    await secondReady;
+
+    const reactionBroadcast = waitForMessage(second, 'reaction_broadcast');
+    send(first, 'reaction_request', {
+      emoji: '😍',
+      reactionId: 'reaction-1',
+    });
+
+    await expect(reactionBroadcast).resolves.toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          emoji: '😍',
+          reactionId: 'reaction-1',
+          senderId: 'first',
+        }),
+      }),
+    );
+  });
 });

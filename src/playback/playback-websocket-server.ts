@@ -3,6 +3,7 @@ import { RawData, WebSocket, WebSocketServer } from 'ws';
 
 const playbackPath = '/rooms/playback/ws';
 const maxOffsetMs = 24 * 60 * 60 * 1000;
+const maxReactionEmojiLength = 16;
 const roomStateLifetimeMs = 6 * 60 * 60 * 1000;
 
 type PlaybackCommand =
@@ -113,6 +114,9 @@ export class PlaybackWebSocketServer {
         break;
       case 'control_request':
         this.handleControlRequest(client, envelope.data);
+        break;
+      case 'reaction_request':
+        this.handleReactionRequest(client, envelope.data);
         break;
     }
   }
@@ -256,6 +260,42 @@ export class PlaybackWebSocketServer {
       recipients,
       serverExecuteAtMs,
     });
+  }
+
+  private handleReactionRequest(
+    sender: ClientState,
+    data?: Record<string, unknown>,
+  ) {
+    const emoji = asString(data?.emoji);
+    const reactionId = asString(data?.reactionId);
+
+    if (
+      !sender.id ||
+      !sender.roomId ||
+      !emoji ||
+      emoji.length > maxReactionEmojiLength ||
+      !reactionId
+    ) {
+      return;
+    }
+
+    const serverTimeMs = Date.now();
+
+    for (const client of this.clients) {
+      if (
+        client.id === sender.id ||
+        !this.isActiveRoomClient(client, sender.roomId)
+      ) {
+        continue;
+      }
+
+      this.send(client, 'reaction_broadcast', {
+        emoji,
+        reactionId,
+        senderId: sender.id,
+        serverTimeMs,
+      });
+    }
   }
 
   private sendPlaybackSnapshot(client: ClientState) {
