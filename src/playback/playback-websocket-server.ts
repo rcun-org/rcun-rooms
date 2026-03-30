@@ -5,7 +5,11 @@ const playbackPath = '/rooms/playback/ws';
 const maxOffsetMs = 24 * 60 * 60 * 1000;
 const roomStateLifetimeMs = 6 * 60 * 60 * 1000;
 
-type PlaybackCommand = 'seek_backward' | 'toggle_play' | 'seek_forward';
+type PlaybackCommand =
+  | 'seek_backward'
+  | 'seek_to'
+  | 'toggle_play'
+  | 'seek_forward';
 
 type ClientState = {
   id: string;
@@ -41,6 +45,7 @@ function asString(value: unknown) {
 function isPlaybackCommand(value: unknown): value is PlaybackCommand {
   return (
     value === 'seek_backward' ||
+    value === 'seek_to' ||
     value === 'toggle_play' ||
     value === 'seek_forward'
   );

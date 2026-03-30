@@ -96,8 +96,8 @@ describe('PlaybackWebSocketServer', () => {
     const ack = waitForMessage(first, 'control_ack');
 
     send(first, 'control_request', {
-      command: 'toggle_play',
-      commandId: 'play-1',
+      command: 'seek_to',
+      commandId: 'seek-1',
       leadMs: 1200,
       shouldPlay: false,
       targetTimeSec: 42,
@@ -113,6 +113,12 @@ describe('PlaybackWebSocketServer', () => {
       Number(firstMessage.data.executeAtLocalMs) -
         Number(secondMessage.data.executeAtLocalMs),
     ).toBe(60_000);
+    expect(firstMessage.data).toEqual(
+      expect.objectContaining({
+        command: 'seek_to',
+        targetTimeSec: 42,
+      }),
+    );
     expect(ackMessage.data).toEqual(
       expect.objectContaining({
         offsetReadyClients: 2,
