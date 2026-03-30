@@ -6,12 +6,30 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
 import { AddChatMessageDto } from './dto/add-chat-message.dto';
 import { AddQueueItemDto } from './dto/add-queue-item.dto';
+import { VerifyRoomAccessDto } from './dto/verify-room-access.dto';
+
+type RoomWithMembers = {
+  id: string;
+  title: string;
+  ownerId: string;
+  backupVideo: string;
+  backupVideoTimestamp: number;
+  backupPlayerState: Prisma.JsonValue;
+  backupChatHistory: string;
+  accessMode: string;
+  lifecycleStatus: string;
+  shareHash: string;
+  passwordDigest: string;
+  draftExpiresAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
 
 @Injectable()
 export class RoomsService implements OnModuleInit, OnModuleDestroy {
@@ -75,9 +93,33 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     return this.toResponse(room);
   }
 
-  async findByShareHash(hash: string) {
-    const roomId = await this.findRoomIdByShareHash(hash);
-    return this.findById(roomId);
+  async findByShareHash(hash: string, accessToken?: string) {
+    const room = await this.findRoomByShareHash(hash);
+
+    if (!this.canReadSharedRoom(room, accessToken)) {
+      return this.toPrivateEntryResponse(room);
+    }
+
+    return this.toResponse(room);
+  }
+
+  async verifySharedAccess(hash: string, dto: VerifyRoomAccessDto) {
+    const room = await this.findRoomByShareHash(hash);
+
+    if (
+      room.accessMode === 'private' &&
+      !this.isPasswordDigestValid(
+        this.createPasswordDigest(dto.roomPassword ?? ''),
+        room.passwordDigest,
+      )
+    ) {
+      throw new ForbiddenException('Room password is incorrect');
+    }
+
+    return {
+      accessToken: this.createRoomAccessToken(room),
+      room: this.toResponse(room),
+    };
   }
 
   async create(ownerId: string, dto: CreateRoomDto) {
@@ -242,18 +284,19 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async listMessagesByShareHash(hash: string) {
-    const roomId = await this.findRoomIdByShareHash(hash);
-    return this.listMessages(roomId);
+  async listMessagesByShareHash(hash: string, accessToken?: string) {
+    const room = await this.requireSharedRoomAccess(hash, accessToken);
+    return this.listMessages(room.id);
   }
 
   async addMessageByShareHash(
     hash: string,
     author: { userId: string; username: string },
     dto: AddChatMessageDto,
+    accessToken?: string,
   ) {
-    const roomId = await this.findRoomIdByShareHash(hash);
-    return this.addMessage(roomId, author, dto);
+    const room = await this.requireSharedRoomAccess(hash, accessToken);
+    return this.addMessage(room.id, author, dto);
   }
 
   async listQueue(roomId: string) {
@@ -266,9 +309,9 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async listQueueByShareHash(hash: string) {
-    const roomId = await this.findRoomIdByShareHash(hash);
-    return this.listQueue(roomId);
+  async listQueueByShareHash(hash: string, accessToken?: string) {
+    const room = await this.requireSharedRoomAccess(hash, accessToken);
+    return this.listQueue(room.id);
   }
 
   async addQueueItem(roomId: string, userId: string, dto: AddQueueItemDto) {
@@ -298,9 +341,10 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     hash: string,
     userId: string,
     dto: AddQueueItemDto,
+    accessToken?: string,
   ) {
-    const roomId = await this.findRoomIdByShareHash(hash);
-    return this.addQueueItem(roomId, userId, dto);
+    const room = await this.requireSharedRoomAccess(hash, accessToken);
+    return this.addQueueItem(room.id, userId, dto);
   }
 
   async skipQueueItem(roomId: string) {
@@ -346,9 +390,9 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async skipQueueItemByShareHash(hash: string) {
-    const roomId = await this.findRoomIdByShareHash(hash);
-    return this.skipQueueItem(roomId);
+  async skipQueueItemByShareHash(hash: string, accessToken?: string) {
+    const room = await this.requireSharedRoomAccess(hash, accessToken);
+    return this.skipQueueItem(room.id);
   }
 
   private async cleanupExpiredDrafts() {
@@ -377,12 +421,66 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     return link.roomId;
   }
 
+  private async findRoomByShareHash(hash: string) {
+    const roomId = await this.findRoomIdByShareHash(hash);
+    const room = await this.prisma.room.findUnique({
+      where: { id: roomId },
+      include: { members: true },
+    });
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+
+    return room;
+  }
+
+  private async requireSharedRoomAccess(hash: string, accessToken?: string) {
+    const room = await this.findRoomByShareHash(hash);
+
+    if (!this.canReadSharedRoom(room, accessToken)) {
+      throw new ForbiddenException('Private room password required');
+    }
+
+    return room;
+  }
+
   private createDraftExpiry() {
     return new Date(Date.now() + this.draftLifetimeMs);
   }
 
   private createPasswordDigest(password = '') {
     return createHash('sha256').update(password).digest('hex');
+  }
+
+  private createRoomAccessToken(room: {
+    passwordDigest: string;
+    shareHash: string;
+  }) {
+    return createHash('sha256')
+      .update(`room-access\0${room.shareHash}\0${room.passwordDigest}`)
+      .digest('hex');
+  }
+
+  private canReadSharedRoom(
+    room: { accessMode: string; passwordDigest: string; shareHash: string },
+    accessToken?: string,
+  ) {
+    return (
+      room.accessMode !== 'private' ||
+      this.isPasswordDigestValid(
+        accessToken ?? '',
+        this.createRoomAccessToken(room),
+      )
+    );
+  }
+
+  private isPasswordDigestValid(candidate: string, expected: string) {
+    if (!candidate || candidate.length !== expected.length) {
+      return false;
+    }
+
+    return timingSafeEqual(Buffer.from(candidate), Buffer.from(expected));
   }
 
   private createShareHash(id: string, title: string, passwordDigest: string) {
@@ -404,21 +502,21 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private toResponse(room: {
-    id: string;
-    title: string;
-    ownerId: string;
-    backupVideo: string;
-    backupVideoTimestamp: number;
-    backupPlayerState: Prisma.JsonValue;
-    backupChatHistory: string;
-    accessMode: string;
-    lifecycleStatus: string;
-    shareHash: string;
-    draftExpiresAt: Date | null;
-    createdAt: Date;
-    updatedAt: Date;
-  }) {
+  private toPrivateEntryResponse(room: RoomWithMembers) {
+    return {
+      id: room.id,
+      _id: room.id,
+      title: room.title,
+      accessMode: room.accessMode,
+      lifecycleStatus: room.lifecycleStatus,
+      shareHash: room.shareHash,
+      draftExpiresAt: room.draftExpiresAt,
+      createdAt: room.createdAt,
+      requiresPassword: true,
+    };
+  }
+
+  private toResponse(room: RoomWithMembers) {
     return {
       id: room.id,
       _id: room.id,

@@ -9,6 +9,7 @@ import {
   UseGuards,
   Req,
   HttpCode,
+  Headers,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -22,6 +23,7 @@ import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
 import { AddChatMessageDto } from './dto/add-chat-message.dto';
 import { AddQueueItemDto } from './dto/add-queue-item.dto';
+import { VerifyRoomAccessDto } from './dto/verify-room-access.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('rooms')
@@ -51,8 +53,11 @@ export class RoomsController {
   @ApiParam({ name: 'hash', description: 'Room share hash' })
   @ApiResponse({ status: 200, description: 'Room chat history' })
   @ApiResponse({ status: 404, description: 'Room not found' })
-  listMessagesByShareHash(@Param('hash') hash: string) {
-    return this.roomsService.listMessagesByShareHash(hash);
+  listMessagesByShareHash(
+    @Param('hash') hash: string,
+    @Headers('x-room-access-token') accessToken?: string,
+  ) {
+    return this.roomsService.listMessagesByShareHash(hash, accessToken);
   }
 
   @Post('shared/:hash/messages')
@@ -67,8 +72,14 @@ export class RoomsController {
     @Param('hash') hash: string,
     @Req() req: { user: { userId: string; username: string } },
     @Body() dto: AddChatMessageDto,
+    @Headers('x-room-access-token') accessToken?: string,
   ) {
-    return this.roomsService.addMessageByShareHash(hash, req.user, dto);
+    return this.roomsService.addMessageByShareHash(
+      hash,
+      req.user,
+      dto,
+      accessToken,
+    );
   }
 
   @Get('shared/:hash/queue')
@@ -76,8 +87,11 @@ export class RoomsController {
   @ApiParam({ name: 'hash', description: 'Room share hash' })
   @ApiResponse({ status: 200, description: 'Room queue' })
   @ApiResponse({ status: 404, description: 'Room not found' })
-  listQueueByShareHash(@Param('hash') hash: string) {
-    return this.roomsService.listQueueByShareHash(hash);
+  listQueueByShareHash(
+    @Param('hash') hash: string,
+    @Headers('x-room-access-token') accessToken?: string,
+  ) {
+    return this.roomsService.listQueueByShareHash(hash, accessToken);
   }
 
   @Post('shared/:hash/queue')
@@ -92,11 +106,13 @@ export class RoomsController {
     @Param('hash') hash: string,
     @Req() req: { user: { userId: string } },
     @Body() dto: AddQueueItemDto,
+    @Headers('x-room-access-token') accessToken?: string,
   ) {
     return this.roomsService.addQueueItemByShareHash(
       hash,
       req.user.userId,
       dto,
+      accessToken,
     );
   }
 
@@ -108,8 +124,25 @@ export class RoomsController {
   @ApiResponse({ status: 201, description: 'Next queued video selected' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Room not found' })
-  skipQueueByShareHash(@Param('hash') hash: string) {
-    return this.roomsService.skipQueueItemByShareHash(hash);
+  skipQueueByShareHash(
+    @Param('hash') hash: string,
+    @Headers('x-room-access-token') accessToken?: string,
+  ) {
+    return this.roomsService.skipQueueItemByShareHash(hash, accessToken);
+  }
+
+  @Post('shared/:hash/access')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Verify private room password by share hash' })
+  @ApiParam({ name: 'hash', description: 'Room share hash' })
+  @ApiResponse({ status: 200, description: 'Room access granted' })
+  @ApiResponse({ status: 403, description: 'Incorrect room password' })
+  @ApiResponse({ status: 404, description: 'Room not found' })
+  verifySharedAccess(
+    @Param('hash') hash: string,
+    @Body() dto: VerifyRoomAccessDto,
+  ) {
+    return this.roomsService.verifySharedAccess(hash, dto);
   }
 
   @Get('shared/:hash')
@@ -117,8 +150,11 @@ export class RoomsController {
   @ApiParam({ name: 'hash', description: 'Room share hash' })
   @ApiResponse({ status: 200, description: 'Room found' })
   @ApiResponse({ status: 404, description: 'Room not found' })
-  findByShareHash(@Param('hash') hash: string) {
-    return this.roomsService.findByShareHash(hash);
+  findByShareHash(
+    @Param('hash') hash: string,
+    @Headers('x-room-access-token') accessToken?: string,
+  ) {
+    return this.roomsService.findByShareHash(hash, accessToken);
   }
 
   @Get(':id/messages')

@@ -1,4 +1,5 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { RoomsService } from './rooms.service';
 
 describe('RoomsService', () => {
@@ -226,6 +227,93 @@ describe('RoomsService', () => {
       where: { hash: room.shareHash },
       select: { roomId: true },
     });
+  });
+
+  it('returns a locked preview for private shared rooms without access token', async () => {
+    const privateRoom = {
+      ...room,
+      accessMode: 'private',
+      passwordDigest: createHash('sha256').update('secret').digest('hex'),
+    };
+    prisma.roomShareLink.findUnique.mockResolvedValue({ roomId: room.id });
+    prisma.room.findUnique.mockResolvedValue(privateRoom);
+
+    const lockedPreview = await service.findByShareHash(room.shareHash);
+
+    expect(lockedPreview).toEqual(
+      expect.objectContaining({
+        accessMode: 'private',
+        requiresPassword: true,
+        shareHash: room.shareHash,
+        title: room.title,
+      }),
+    );
+    expect(lockedPreview).not.toHaveProperty('backupVideo');
+  });
+
+  it('rejects an incorrect private room password', async () => {
+    const privateRoom = {
+      ...room,
+      accessMode: 'private',
+      passwordDigest: createHash('sha256').update('secret').digest('hex'),
+    };
+    prisma.roomShareLink.findUnique.mockResolvedValue({ roomId: room.id });
+    prisma.room.findUnique.mockResolvedValue(privateRoom);
+
+    await expect(
+      service.verifySharedAccess(room.shareHash, { roomPassword: 'wrong' }),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('grants a token for the correct private room password', async () => {
+    const privateRoom = {
+      ...room,
+      accessMode: 'private',
+      passwordDigest: createHash('sha256').update('secret').digest('hex'),
+    };
+    prisma.roomShareLink.findUnique.mockResolvedValue({ roomId: room.id });
+    prisma.room.findUnique.mockResolvedValue(privateRoom);
+
+    const access = await service.verifySharedAccess(room.shareHash, {
+      roomPassword: 'secret',
+    });
+
+    expect(access).toEqual({
+      accessToken: expect.any(String),
+      room: expect.objectContaining({
+        accessMode: 'private',
+        backupVideo: room.backupVideo,
+        id: room.id,
+      }),
+    });
+
+    prisma.roomShareLink.findUnique.mockResolvedValue({ roomId: room.id });
+    prisma.room.findUnique.mockResolvedValue(privateRoom);
+    const unlockedRoom = await service.findByShareHash(
+      room.shareHash,
+      access.accessToken,
+    );
+
+    expect(unlockedRoom).toEqual(
+      expect.objectContaining({
+        backupVideo: room.backupVideo,
+      }),
+    );
+    expect(unlockedRoom).not.toHaveProperty('requiresPassword');
+  });
+
+  it('blocks private shared messages without room access token', async () => {
+    const privateRoom = {
+      ...room,
+      accessMode: 'private',
+      passwordDigest: createHash('sha256').update('secret').digest('hex'),
+    };
+    prisma.roomShareLink.findUnique.mockResolvedValue({ roomId: room.id });
+    prisma.room.findUnique.mockResolvedValue(privateRoom);
+
+    await expect(
+      service.listMessagesByShareHash(room.shareHash),
+    ).rejects.toThrow(ForbiddenException);
   });
 
   it('adds a queue item after the current last position', async () => {
