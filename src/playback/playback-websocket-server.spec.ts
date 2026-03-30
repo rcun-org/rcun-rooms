@@ -172,4 +172,38 @@ describe('PlaybackWebSocketServer', () => {
       }),
     );
   });
+
+  it('broadcasts saved chat messages to other clients in the same room', async () => {
+    const first = await openSocket(port);
+    const second = await openSocket(port);
+    sockets.push(first, second);
+
+    const firstReady = waitForMessage(first, 'client_ready');
+    send(first, 'client_hello', { clientId: 'first', roomId: 'movie-night' });
+    await firstReady;
+
+    const secondReady = waitForMessage(second, 'client_ready');
+    send(second, 'client_hello', { clientId: 'second', roomId: 'movie-night' });
+    await secondReady;
+
+    const message = {
+      authorId: 'user-1',
+      authorName: 'Mira',
+      createdAt: '2026-03-30T19:20:00.000Z',
+      id: 'message-1',
+      roomId: 'room-uuid',
+      text: 'This scene is wild',
+    };
+    const chatBroadcast = waitForMessage(second, 'chat_message_broadcast');
+    send(first, 'chat_message_request', { message });
+
+    await expect(chatBroadcast).resolves.toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          message,
+          senderId: 'first',
+        }),
+      }),
+    );
+  });
 });

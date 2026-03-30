@@ -2,6 +2,8 @@ import { Server } from 'node:http';
 import { RawData, WebSocket, WebSocketServer } from 'ws';
 
 const playbackPath = '/rooms/playback/ws';
+const maxChatFieldLength = 160;
+const maxChatTextLength = 500;
 const maxOffsetMs = 24 * 60 * 60 * 1000;
 const maxReactionEmojiLength = 16;
 const roomStateLifetimeMs = 6 * 60 * 60 * 1000;
@@ -35,12 +37,63 @@ type RelayEnvelope = {
   type?: string;
 };
 
+type RoomChatMessagePayload = {
+  authorId: string;
+  authorName: string;
+  createdAt: string;
+  id: string;
+  roomId: string;
+  text: string;
+};
+
 function asFiniteNumber(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 function asString(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function asRecord(value: unknown) {
+  return value && typeof value === 'object'
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function asChatMessagePayload(value: unknown): RoomChatMessagePayload | null {
+  const message = asRecord(value);
+
+  if (!message) {
+    return null;
+  }
+
+  const payload = {
+    authorId: asString(message.authorId),
+    authorName: asString(message.authorName),
+    createdAt: asString(message.createdAt),
+    id: asString(message.id),
+    roomId: asString(message.roomId),
+    text: asString(message.text),
+  };
+
+  if (
+    !payload.authorId ||
+    payload.authorId.length > maxChatFieldLength ||
+    !payload.authorName ||
+    payload.authorName.length > maxChatFieldLength ||
+    !payload.createdAt ||
+    payload.createdAt.length > maxChatFieldLength ||
+    !payload.id ||
+    payload.id.length > maxChatFieldLength ||
+    !payload.roomId ||
+    payload.roomId.length > maxChatFieldLength ||
+    !payload.text ||
+    payload.text.length > maxChatTextLength
+  ) {
+    return null;
+  }
+
+  return payload;
 }
 
 function isPlaybackCommand(value: unknown): value is PlaybackCommand {
@@ -114,6 +167,9 @@ export class PlaybackWebSocketServer {
         break;
       case 'control_request':
         this.handleControlRequest(client, envelope.data);
+        break;
+      case 'chat_message_request':
+        this.handleChatMessageRequest(client, envelope.data);
         break;
       case 'reaction_request':
         this.handleReactionRequest(client, envelope.data);
@@ -260,6 +316,32 @@ export class PlaybackWebSocketServer {
       recipients,
       serverExecuteAtMs,
     });
+  }
+
+  private handleChatMessageRequest(
+    sender: ClientState,
+    data?: Record<string, unknown>,
+  ) {
+    const message = asChatMessagePayload(data?.message);
+
+    if (!sender.id || !sender.roomId || !message) {
+      return;
+    }
+
+    for (const client of this.clients) {
+      if (
+        client.id === sender.id ||
+        !this.isActiveRoomClient(client, sender.roomId)
+      ) {
+        continue;
+      }
+
+      this.send(client, 'chat_message_broadcast', {
+        message,
+        senderId: sender.id,
+        serverTimeMs: Date.now(),
+      });
+    }
   }
 
   private handleReactionRequest(
