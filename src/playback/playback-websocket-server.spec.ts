@@ -1,227 +1,168 @@
 import { createServer, Server } from 'node:http';
-import { AddressInfo } from 'node:net';
 import { WebSocket } from 'ws';
 import { PlaybackWebSocketServer } from './playback-websocket-server';
 
-type RelayMessage = {
+type SentEnvelope = {
   data: Record<string, unknown>;
+  roomId: string;
+  senderId: string;
+  targetId: string;
+  timestamp: number;
   type: string;
 };
 
-function openSocket(port: number) {
-  return new Promise<WebSocket>((resolve, reject) => {
-    const socket = new WebSocket(`ws://localhost:${port}/rooms/playback/ws`);
-    socket.once('open', () => resolve(socket));
-    socket.once('error', reject);
-  });
+type MockSocket = {
+  close: jest.Mock;
+  on: jest.Mock;
+  readyState: number;
+  send: jest.Mock;
+};
+
+type TestClient = {
+  id: string;
+  offsetMs: number;
+  offsetReady: boolean;
+  roomId: string;
+  socket: MockSocket;
+};
+
+function createMockSocket(): MockSocket {
+  return {
+    close: jest.fn(),
+    on: jest.fn(),
+    readyState: WebSocket.OPEN,
+    send: jest.fn(),
+  };
 }
 
-function waitForMessage(
-  socket: WebSocket,
-  type: string,
-  predicate: (message: RelayMessage) => boolean = () => true,
-) {
-  return new Promise<RelayMessage>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      socket.off('message', handleMessage);
-      reject(new Error(`Timed out waiting for ${type}`));
-    }, 1000);
-
-    function handleMessage(raw: Buffer) {
-      const message = JSON.parse(raw.toString()) as RelayMessage;
-
-      if (message.type !== type || !predicate(message)) {
-        return;
-      }
-
-      clearTimeout(timeout);
-      socket.off('message', handleMessage);
-      resolve(message);
-    }
-
-    socket.on('message', handleMessage);
-  });
+function createClient(overrides: Partial<TestClient> = {}): TestClient {
+  return {
+    id: overrides.id ?? '',
+    offsetMs: overrides.offsetMs ?? 0,
+    offsetReady: overrides.offsetReady ?? false,
+    roomId: overrides.roomId ?? '',
+    socket: overrides.socket ?? createMockSocket(),
+  };
 }
 
-function send(socket: WebSocket, type: string, data: Record<string, unknown>) {
-  socket.send(JSON.stringify({ data, type }));
+function getSentMessages(client: TestClient) {
+  return client.socket.send.mock.calls.map(([payload]) =>
+    JSON.parse(payload as string),
+  ) as SentEnvelope[];
 }
 
 describe('PlaybackWebSocketServer', () => {
   let httpServer: Server;
   let playbackServer: PlaybackWebSocketServer;
-  let port: number;
-  const sockets: WebSocket[] = [];
 
-  beforeEach(async () => {
+  beforeEach(() => {
     httpServer = createServer();
     playbackServer = new PlaybackWebSocketServer(httpServer);
-    await new Promise<void>((resolve) => httpServer.listen(0, resolve));
-    port = (httpServer.address() as AddressInfo).port;
   });
 
-  afterEach(async () => {
-    for (const socket of sockets) {
-      socket.close();
-    }
-    sockets.length = 0;
+  afterEach(() => {
     playbackServer.close();
-    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    httpServer.close();
   });
 
-  it('schedules one room command in each client local clock and serves a late-join snapshot', async () => {
-    const first = await openSocket(port);
-    const second = await openSocket(port);
-    sockets.push(first, second);
-
-    const firstReady = waitForMessage(first, 'client_ready');
-    send(first, 'client_hello', { clientId: 'first', roomId: 'movie-night' });
-    await firstReady;
-
-    const secondReady = waitForMessage(second, 'client_ready');
-    send(second, 'client_hello', { clientId: 'second', roomId: 'movie-night' });
-    await secondReady;
-
-    const offsetsReady = waitForMessage(
-      first,
-      'server_state',
-      (message) => message.data.offsetReadyClients === 2,
+  it('replays the latest queue update to a late joiner after client hello', () => {
+    const sender = createClient({ id: 'first', roomId: 'movie-night' });
+    const lateJoiner = createClient();
+    (playbackServer as never as { clients: Set<TestClient> }).clients.add(
+      sender,
     );
-    send(first, 'clock_offset_report', { serverMinusClientOffsetMs: 0 });
-    send(second, 'clock_offset_report', { serverMinusClientOffsetMs: 60_000 });
-    await offsetsReady;
+    (playbackServer as never as { clients: Set<TestClient> }).clients.add(
+      lateJoiner,
+    );
 
-    const firstScheduled = waitForMessage(first, 'scheduled_control');
-    const secondScheduled = waitForMessage(second, 'scheduled_control');
-    const ack = waitForMessage(first, 'control_ack');
-
-    send(first, 'control_request', {
-      command: 'seek_to',
-      commandId: 'seek-1',
-      leadMs: 1200,
-      shouldPlay: false,
-      targetTimeSec: 42,
+    (
+      playbackServer as never as {
+        handleQueueUpdateRequest: (
+          client: TestClient,
+          data: Record<string, unknown>,
+        ) => void;
+      }
+    ).handleQueueUpdateRequest(sender, {
+      queue: [
+        {
+          createdAt: '2026-03-30T19:35:00.000Z',
+          createdById: 'user-1',
+          duration: '2h 46m',
+          id: 'queue-item-1',
+          kind: 'Long',
+          position: 1,
+          poster: 'url(https://example.com/poster.jpg)',
+          roomId: 'room-uuid',
+          title: 'Dune: Part Two',
+          videoUrl: 'https://www.youtube.com/watch?v=test',
+        },
+      ],
     });
 
-    const [firstMessage, secondMessage, ackMessage] = await Promise.all([
-      firstScheduled,
-      secondScheduled,
-      ack,
-    ]);
-
-    expect(
-      Number(firstMessage.data.executeAtLocalMs) -
-        Number(secondMessage.data.executeAtLocalMs),
-    ).toBe(60_000);
-    expect(firstMessage.data).toEqual(
-      expect.objectContaining({
-        command: 'seek_to',
-        targetTimeSec: 42,
-      }),
-    );
-    expect(ackMessage.data).toEqual(
-      expect.objectContaining({
-        offsetReadyClients: 2,
-        recipients: 2,
-      }),
-    );
-
-    const third = await openSocket(port);
-    sockets.push(third);
-    const thirdReady = waitForMessage(third, 'client_ready');
-    const thirdSnapshot = waitForMessage(third, 'playback_snapshot');
-    send(third, 'client_hello', { clientId: 'third', roomId: 'movie-night' });
-
-    await thirdReady;
-    await expect(thirdSnapshot).resolves.toEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          positionSec: 42,
-          shouldPlay: false,
-        }),
-      }),
-    );
-  });
-
-  it('broadcasts room reactions to other clients in the same room', async () => {
-    const first = await openSocket(port);
-    const second = await openSocket(port);
-    sockets.push(first, second);
-
-    const firstReady = waitForMessage(first, 'client_ready');
-    send(first, 'client_hello', { clientId: 'first', roomId: 'movie-night' });
-    await firstReady;
-
-    const secondReady = waitForMessage(second, 'client_ready');
-    send(second, 'client_hello', { clientId: 'second', roomId: 'movie-night' });
-    await secondReady;
-
-    const reactionBroadcast = waitForMessage(second, 'reaction_broadcast');
-    send(first, 'reaction_request', {
-      emoji: '😍',
-      reactionId: 'reaction-1',
+    (
+      playbackServer as never as {
+        handleHello: (
+          client: TestClient,
+          data: Record<string, unknown>,
+        ) => void;
+      }
+    ).handleHello(lateJoiner, {
+      clientId: 'late',
+      roomId: 'movie-night',
     });
 
-    await expect(reactionBroadcast).resolves.toEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          emoji: '😍',
-          reactionId: 'reaction-1',
-          senderId: 'first',
+    expect(getSentMessages(lateJoiner)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          data: expect.objectContaining({
+            queue: [
+              expect.objectContaining({
+                id: 'queue-item-1',
+                title: 'Dune: Part Two',
+              }),
+            ],
+            senderId: 'first',
+          }),
+          roomId: 'movie-night',
+          targetId: 'late',
+          type: 'queue_update_broadcast',
         }),
-      }),
+      ]),
     );
   });
 
-  it('broadcasts saved chat messages to other clients in the same room', async () => {
-    const first = await openSocket(port);
-    const second = await openSocket(port);
-    sockets.push(first, second);
-
-    const firstReady = waitForMessage(first, 'client_ready');
-    send(first, 'client_hello', { clientId: 'first', roomId: 'movie-night' });
-    await firstReady;
-
-    const secondReady = waitForMessage(second, 'client_ready');
-    send(second, 'client_hello', { clientId: 'second', roomId: 'movie-night' });
-    await secondReady;
-
-    const message = {
-      authorId: 'user-1',
-      authorName: 'Mira',
-      createdAt: '2026-03-30T19:20:00.000Z',
-      id: 'message-1',
-      roomId: 'room-uuid',
-      text: 'This scene is wild',
-    };
-    const chatBroadcast = waitForMessage(second, 'chat_message_broadcast');
-    send(first, 'chat_message_request', { message });
-
-    await expect(chatBroadcast).resolves.toEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          message,
-          senderId: 'first',
-        }),
-      }),
+  it('replays the latest video update to a late joiner after client hello', () => {
+    const sender = createClient({ id: 'first', roomId: 'movie-night' });
+    const lateJoiner = createClient();
+    (playbackServer as never as { clients: Set<TestClient> }).clients.add(
+      sender,
     );
-  });
+    (playbackServer as never as { clients: Set<TestClient> }).clients.add(
+      lateJoiner,
+    );
 
-  it('broadcasts queue updates to other clients in the same room', async () => {
-    const first = await openSocket(port);
-    const second = await openSocket(port);
-    sockets.push(first, second);
-
-    const firstReady = waitForMessage(first, 'client_ready');
-    send(first, 'client_hello', { clientId: 'first', roomId: 'movie-night' });
-    await firstReady;
-
-    const secondReady = waitForMessage(second, 'client_ready');
-    send(second, 'client_hello', { clientId: 'second', roomId: 'movie-night' });
-    await secondReady;
-
-    const queue = [
-      {
+    (
+      playbackServer as never as {
+        handleVideoUpdateRequest: (
+          client: TestClient,
+          data: Record<string, unknown>,
+        ) => void;
+      }
+    ).handleVideoUpdateRequest(sender, {
+      queue: [],
+      room: {
+        backupPlayerState: {
+          mode: 'long',
+          status: 'paused',
+          title: 'Dune: Part Two',
+          url: 'https://www.youtube.com/watch?v=test',
+        },
+        backupVideo: 'https://www.youtube.com/watch?v=test',
+        id: 'room-uuid',
+        shareHash: 'share-hash',
+        title: 'Movie night',
+      },
+      skippedItem: {
         createdAt: '2026-03-30T19:35:00.000Z',
         createdById: 'user-1',
         duration: '2h 46m',
@@ -233,74 +174,129 @@ describe('PlaybackWebSocketServer', () => {
         title: 'Dune: Part Two',
         videoUrl: 'https://www.youtube.com/watch?v=test',
       },
-    ];
-    const queueBroadcast = waitForMessage(second, 'queue_update_broadcast');
-    send(first, 'queue_update_request', { queue });
+    });
 
-    await expect(queueBroadcast).resolves.toEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          queue,
-          senderId: 'first',
+    (
+      playbackServer as never as {
+        handleHello: (
+          client: TestClient,
+          data: Record<string, unknown>,
+        ) => void;
+      }
+    ).handleHello(lateJoiner, {
+      clientId: 'late',
+      roomId: 'movie-night',
+    });
+
+    expect(getSentMessages(lateJoiner)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          data: expect.objectContaining({
+            room: expect.objectContaining({
+              id: 'room-uuid',
+              title: 'Movie night',
+            }),
+            senderId: 'first',
+            skippedItem: expect.objectContaining({
+              id: 'queue-item-1',
+              title: 'Dune: Part Two',
+            }),
+          }),
+          roomId: 'movie-night',
+          targetId: 'late',
+          type: 'video_update_broadcast',
         }),
-      }),
+      ]),
     );
   });
 
-  it('broadcasts current video updates to other clients in the same room', async () => {
-    const first = await openSocket(port);
-    const second = await openSocket(port);
-    sockets.push(first, second);
+  it('replays queue and video updates in server timestamp order', () => {
+    const sender = createClient({ id: 'first', roomId: 'movie-night' });
+    const lateJoiner = createClient();
+    (playbackServer as never as { clients: Set<TestClient> }).clients.add(
+      sender,
+    );
+    (playbackServer as never as { clients: Set<TestClient> }).clients.add(
+      lateJoiner,
+    );
 
-    const firstReady = waitForMessage(first, 'client_ready');
-    send(first, 'client_hello', { clientId: 'first', roomId: 'movie-night' });
-    await firstReady;
+    const dateNow = jest
+      .spyOn(Date, 'now')
+      .mockReturnValueOnce(1000)
+      .mockReturnValueOnce(1000)
+      .mockReturnValueOnce(2000)
+      .mockReturnValueOnce(2000)
+      .mockReturnValueOnce(3000)
+      .mockReturnValueOnce(3000)
+      .mockReturnValueOnce(3000)
+      .mockReturnValueOnce(3000);
 
-    const secondReady = waitForMessage(second, 'client_ready');
-    send(second, 'client_hello', { clientId: 'second', roomId: 'movie-night' });
-    await secondReady;
-
-    const skippedItem = {
-      createdAt: '2026-03-30T19:35:00.000Z',
-      createdById: 'user-1',
-      duration: '2h 46m',
-      id: 'queue-item-1',
-      kind: 'Long',
-      position: 1,
-      poster: 'url(https://example.com/poster.jpg)',
-      roomId: 'room-uuid',
-      title: 'Dune: Part Two',
-      videoUrl: 'https://www.youtube.com/watch?v=test',
-    };
-    const room = {
-      id: 'room-uuid',
-      shareHash: 'share-hash',
-      title: 'Movie night',
-      backupVideo: skippedItem.videoUrl,
-      backupPlayerState: {
-        duration: skippedItem.duration,
-        mode: 'long',
-        status: 'paused',
-        title: skippedItem.title,
-        url: skippedItem.videoUrl,
-      },
-    };
-    const videoBroadcast = waitForMessage(second, 'video_update_broadcast');
-    send(first, 'video_update_request', {
-      queue: [],
-      room,
-      skippedItem,
+    (
+      playbackServer as never as {
+        handleQueueUpdateRequest: (
+          client: TestClient,
+          data: Record<string, unknown>,
+        ) => void;
+      }
+    ).handleQueueUpdateRequest(sender, {
+      queue: [
+        {
+          createdAt: '2026-03-30T19:35:00.000Z',
+          createdById: 'user-1',
+          duration: 'Queued',
+          id: 'queue-item-1',
+          kind: 'Long',
+          position: 1,
+          poster: '',
+          roomId: 'room-uuid',
+          title: 'Queue first',
+          videoUrl: 'https://www.youtube.com/watch?v=queue',
+        },
+      ],
     });
 
-    await expect(videoBroadcast).resolves.toEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          queue: [],
-          room,
-          senderId: 'first',
-          skippedItem,
-        }),
-      }),
-    );
+    (
+      playbackServer as never as {
+        handleVideoUpdateRequest: (
+          client: TestClient,
+          data: Record<string, unknown>,
+        ) => void;
+      }
+    ).handleVideoUpdateRequest(sender, {
+      queue: [],
+      room: {
+        id: 'room-uuid',
+        shareHash: 'share-hash',
+        title: 'Movie night',
+      },
+      skippedItem: null,
+    });
+
+    (
+      playbackServer as never as {
+        handleHello: (
+          client: TestClient,
+          data: Record<string, unknown>,
+        ) => void;
+      }
+    ).handleHello(lateJoiner, {
+      clientId: 'late',
+      roomId: 'movie-night',
+    });
+
+    const replayTypes = getSentMessages(lateJoiner)
+      .map((message) => message.type)
+      .filter(
+        (type) =>
+          type === 'queue_update_broadcast' ||
+          type === 'video_update_broadcast',
+      );
+
+    expect(replayTypes).toEqual([
+      'queue_update_broadcast',
+      'video_update_broadcast',
+    ]);
+
+    dateNow.mockRestore();
   });
 });

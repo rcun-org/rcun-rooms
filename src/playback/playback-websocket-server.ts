@@ -65,6 +65,19 @@ type RoomVideoUpdatePayload = {
   skippedItem: RoomQueueItemPayload | null;
 };
 
+type RoomRealtimeReplayState = {
+  queueUpdate?: {
+    queue: RoomQueueItemPayload[];
+    senderId: string;
+    serverTimeMs: number;
+  };
+  videoUpdate?: {
+    payload: RoomVideoUpdatePayload;
+    senderId: string;
+    serverTimeMs: number;
+  };
+};
+
 function asFiniteNumber(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
@@ -196,6 +209,10 @@ function isPlaybackCommand(value: unknown): value is PlaybackCommand {
 
 export class PlaybackWebSocketServer {
   private readonly clients = new Set<ClientState>();
+  private readonly roomRealtimeReplay = new Map<
+    string,
+    RoomRealtimeReplayState
+  >();
   private readonly roomStates = new Map<string, RoomPlaybackState>();
   private readonly webSocketServer: WebSocketServer;
 
@@ -290,6 +307,7 @@ export class PlaybackWebSocketServer {
     });
     this.broadcastRoomState(roomId);
     this.sendPlaybackSnapshot(client);
+    this.sendRealtimeReplay(client);
   }
 
   private handleClockSyncRequest(
@@ -486,6 +504,7 @@ export class PlaybackWebSocketServer {
     }
 
     const serverTimeMs = Date.now();
+    this.rememberQueueUpdate(sender.roomId, queue, sender.id, serverTimeMs);
 
     for (const client of this.clients) {
       if (
@@ -514,6 +533,7 @@ export class PlaybackWebSocketServer {
     }
 
     const serverTimeMs = Date.now();
+    this.rememberVideoUpdate(sender.roomId, payload, sender.id, serverTimeMs);
 
     for (const client of this.clients) {
       if (
@@ -544,6 +564,45 @@ export class PlaybackWebSocketServer {
       serverTimeMs,
       shouldPlay: state.isPlaying,
     });
+  }
+
+  private sendRealtimeReplay(client: ClientState) {
+    if (!client.roomId) {
+      return;
+    }
+
+    const replay = this.roomRealtimeReplay.get(client.roomId);
+
+    if (!replay) {
+      return;
+    }
+
+    const replayEvents = [
+      replay.queueUpdate
+        ? {
+            data: replay.queueUpdate,
+            serverTimeMs: replay.queueUpdate.serverTimeMs,
+            type: 'queue_update_broadcast' as const,
+          }
+        : null,
+      replay.videoUpdate
+        ? {
+            data: {
+              ...replay.videoUpdate.payload,
+              senderId: replay.videoUpdate.senderId,
+              serverTimeMs: replay.videoUpdate.serverTimeMs,
+            },
+            serverTimeMs: replay.videoUpdate.serverTimeMs,
+            type: 'video_update_broadcast' as const,
+          }
+        : null,
+    ]
+      .filter((event) => event !== null)
+      .sort((left, right) => left.serverTimeMs - right.serverTimeMs);
+
+    for (const event of replayEvents) {
+      this.send(client, event.type, event.data);
+    }
   }
 
   private getCurrentPositionSec(
@@ -604,6 +663,49 @@ export class PlaybackWebSocketServer {
         this.roomStates.delete(roomId);
       }
     }
+
+    for (const [roomId, replay] of this.roomRealtimeReplay) {
+      const latestUpdateMs = Math.max(
+        replay.queueUpdate?.serverTimeMs ?? 0,
+        replay.videoUpdate?.serverTimeMs ?? 0,
+      );
+
+      if (latestUpdateMs > 0 && latestUpdateMs < expiresBefore) {
+        this.roomRealtimeReplay.delete(roomId);
+      }
+    }
+  }
+
+  private rememberQueueUpdate(
+    roomId: string,
+    queue: RoomQueueItemPayload[],
+    senderId: string,
+    serverTimeMs: number,
+  ) {
+    const currentReplay = this.roomRealtimeReplay.get(roomId) ?? {};
+    currentReplay.queueUpdate = {
+      queue,
+      senderId,
+      serverTimeMs,
+    };
+    this.roomRealtimeReplay.set(roomId, currentReplay);
+    this.removeExpiredRoomStates();
+  }
+
+  private rememberVideoUpdate(
+    roomId: string,
+    payload: RoomVideoUpdatePayload,
+    senderId: string,
+    serverTimeMs: number,
+  ) {
+    const currentReplay = this.roomRealtimeReplay.get(roomId) ?? {};
+    currentReplay.videoUpdate = {
+      payload,
+      senderId,
+      serverTimeMs,
+    };
+    this.roomRealtimeReplay.set(roomId, currentReplay);
+    this.removeExpiredRoomStates();
   }
 
   private send(client: ClientState, type: string, data: object) {
