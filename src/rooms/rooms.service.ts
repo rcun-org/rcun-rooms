@@ -64,7 +64,6 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     const rooms = await this.prisma.room.findMany({
       where: {
         accessMode: 'public',
-        lifecycleStatus: 'ready',
       },
       orderBy: { createdAt: 'desc' },
       include: { members: true },
