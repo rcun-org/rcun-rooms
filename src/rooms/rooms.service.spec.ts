@@ -61,13 +61,13 @@ describe('RoomsService', () => {
     service = new RoomsService(prisma as any);
   });
 
-  it('returns public ready rooms and drafts in legacy-compatible response shape', async () => {
+  it('returns only public ready rooms in legacy-compatible response shape', async () => {
     prisma.room.findMany.mockResolvedValue([room]);
 
     const result = await service.findAll();
 
     expect(prisma.room.findMany).toHaveBeenCalledWith({
-      where: { accessMode: 'public' },
+      where: { accessMode: 'public', lifecycleStatus: 'ready' },
       orderBy: { createdAt: 'desc' },
       include: { members: true },
     });
@@ -81,6 +81,21 @@ describe('RoomsService', () => {
         members: [],
       }),
     ]);
+  });
+
+  it('does not expose draft rooms in the public browse query', async () => {
+    prisma.room.findMany.mockResolvedValue([]);
+
+    await service.findAll();
+
+    expect(prisma.room.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          accessMode: 'public',
+          lifecycleStatus: 'ready',
+        }),
+      }),
+    );
   });
 
   it('returns ready rooms owned by a user including private rooms', async () => {
