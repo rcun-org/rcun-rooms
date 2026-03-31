@@ -330,6 +330,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
 
   async addQueueItem(roomId: string, userId: string, dto: AddQueueItemDto) {
     await this.requireRoom(roomId);
+    await this.requireQueueManager(roomId, userId);
 
     const lastItem = await this.prisma.roomQueueItem.findFirst({
       where: { roomId },
@@ -361,8 +362,9 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     return this.addQueueItem(room.id, userId, dto);
   }
 
-  async skipQueueItem(roomId: string) {
+  async skipQueueItem(roomId: string, userId: string) {
     await this.requireRoom(roomId);
+    await this.requireQueueManager(roomId, userId);
 
     const nextItem = await this.prisma.roomQueueItem.findFirst({
       where: { roomId },
@@ -404,9 +406,13 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async skipQueueItemByShareHash(hash: string, accessToken?: string) {
+  async skipQueueItemByShareHash(
+    hash: string,
+    userId: string,
+    accessToken?: string,
+  ) {
     const room = await this.requireSharedRoomAccess(hash, accessToken);
-    return this.skipQueueItem(room.id);
+    return this.skipQueueItem(room.id, userId);
   }
 
   private async cleanupExpiredDrafts() {
@@ -513,6 +519,28 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
 
     if (!room) {
       throw new NotFoundException('Room not found');
+    }
+  }
+
+  private async requireQueueManager(roomId: string, userId: string) {
+    const member = await this.prisma.roomMember.findUnique({
+      where: {
+        roomId_userId: {
+          roomId,
+          userId,
+        },
+      },
+      select: {
+        role: true,
+      },
+    });
+
+    if (!member) {
+      throw new ForbiddenException('Only host can manage the queue');
+    }
+
+    if (member.role !== 'owner' && member.role !== 'moderator') {
+      throw new ForbiddenException('Only host can manage the queue');
     }
   }
 

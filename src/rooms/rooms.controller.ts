@@ -126,9 +126,14 @@ export class RoomsController {
   @ApiResponse({ status: 404, description: 'Room not found' })
   skipQueueByShareHash(
     @Param('hash') hash: string,
+    @Req() req: { user: { userId: string } },
     @Headers('x-room-access-token') accessToken?: string,
   ) {
-    return this.roomsService.skipQueueItemByShareHash(hash, accessToken);
+    return this.roomsService.skipQueueItemByShareHash(
+      hash,
+      req.user.userId,
+      accessToken,
+    );
   }
 
   @Post('shared/:hash/access')
@@ -215,8 +220,8 @@ export class RoomsController {
   @ApiResponse({ status: 201, description: 'Next queued video selected' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Room not found' })
-  skipQueue(@Param('id') id: string) {
-    return this.roomsService.skipQueueItem(id);
+  skipQueue(@Param('id') id: string, @Req() req: { user: { userId: string } }) {
+    return this.roomsService.skipQueueItem(id, req.user.userId);
   }
 
   @Get(':id')

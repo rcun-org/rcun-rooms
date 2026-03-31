@@ -16,6 +16,7 @@ describe('RoomsService', () => {
     },
     roomMember: {
       create: jest.fn(),
+      findUnique: jest.fn(),
       upsert: jest.fn(),
     },
     roomMessage: {
@@ -390,7 +391,7 @@ describe('RoomsService', () => {
       createdById: room.ownerId,
       createdAt: new Date('2024-02-07T00:00:00.000Z'),
     };
-    prisma.room.findUnique.mockResolvedValue({ id: room.id });
+    prisma.roomMember.findUnique.mockResolvedValue({ role: 'owner' });
     prisma.roomQueueItem.findFirst.mockResolvedValue({ position: 2 });
     prisma.roomQueueItem.create.mockResolvedValue(queueItem);
 
@@ -431,7 +432,7 @@ describe('RoomsService', () => {
       createdById: room.ownerId,
       createdAt: new Date('2024-02-07T00:00:00.000Z'),
     };
-    prisma.room.findUnique.mockResolvedValue({ id: room.id });
+    prisma.roomMember.findUnique.mockResolvedValue({ role: 'owner' });
     prisma.roomQueueItem.findFirst.mockResolvedValue(queueItem);
     prisma.room.update.mockResolvedValue({
       ...room,
@@ -447,7 +448,7 @@ describe('RoomsService', () => {
     prisma.roomQueueItem.delete.mockResolvedValue(queueItem);
     prisma.roomQueueItem.findMany.mockResolvedValue([]);
 
-    await expect(service.skipQueueItem(room.id)).resolves.toEqual({
+    await expect(service.skipQueueItem(room.id, room.ownerId)).resolves.toEqual({
       queue: [],
       room: expect.objectContaining({
         backupVideo: queueItem.videoUrl,
@@ -462,5 +463,27 @@ describe('RoomsService', () => {
     expect(prisma.roomQueueItem.delete).toHaveBeenCalledWith({
       where: { id: queueItem.id },
     });
+  });
+
+  it('blocks queue updates from regular members', async () => {
+    prisma.roomMember.findUnique.mockResolvedValue({ role: 'member' });
+
+    await expect(
+      service.addQueueItem(room.id, '770e8400-e29b-41d4-a716-446655440000', {
+        duration: '2h',
+        kind: 'Long',
+        poster: 'linear-gradient(#000,#111)',
+        title: 'Next movie',
+        videoUrl: 'https://example.com/next',
+      }),
+    ).rejects.toThrow(new ForbiddenException('Only host can manage the queue'));
+  });
+
+  it('blocks queue skipping from users outside host roles', async () => {
+    prisma.roomMember.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.skipQueueItem(room.id, '770e8400-e29b-41d4-a716-446655440001'),
+    ).rejects.toThrow(new ForbiddenException('Only host can manage the queue'));
   });
 });
