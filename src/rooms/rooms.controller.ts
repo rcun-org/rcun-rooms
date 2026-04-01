@@ -48,6 +48,16 @@ export class RoomsController {
     return this.roomsService.findMine(req.user.userId);
   }
 
+  @Get('favorites')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Get rooms favorited by current user' })
+  @ApiResponse({ status: 200, description: 'List of favorite rooms' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  findFavorites(@Req() req: { user: { userId: string } }) {
+    return this.roomsService.findFavorites(req.user.userId);
+  }
+
   @Get('shared/:hash/messages')
   @ApiOperation({ summary: 'Get room chat messages by share hash' })
   @ApiParam({ name: 'hash', description: 'Room share hash' })
@@ -222,6 +232,36 @@ export class RoomsController {
   @ApiResponse({ status: 404, description: 'Room not found' })
   skipQueue(@Param('id') id: string, @Req() req: { user: { userId: string } }) {
     return this.roomsService.skipQueueItem(id, req.user.userId);
+  }
+
+  @Post(':id/favorite')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Add room to current user favorites' })
+  @ApiParam({ name: 'id', description: 'Room UUID' })
+  @ApiResponse({ status: 201, description: 'Room added to favorites' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Room not found' })
+  addFavorite(
+    @Param('id') id: string,
+    @Req() req: { user: { userId: string } },
+  ) {
+    return this.roomsService.addFavorite(id, req.user.userId);
+  }
+
+  @Delete(':id/favorite')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(204)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Remove room from current user favorites' })
+  @ApiParam({ name: 'id', description: 'Room UUID' })
+  @ApiResponse({ status: 204, description: 'Room removed from favorites' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async removeFavorite(
+    @Param('id') id: string,
+    @Req() req: { user: { userId: string } },
+  ) {
+    await this.roomsService.removeFavorite(id, req.user.userId);
   }
 
   @Get(':id')

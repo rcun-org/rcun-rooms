@@ -38,6 +38,7 @@ model Room {
   messages   RoomMessage[]
   queueItems RoomQueueItem[]
   shareLinks RoomShareLink[]
+  favorites  RoomFavorite[]
 
   @@map("rooms")
 }
@@ -101,4 +102,17 @@ model RoomQueueItem {
 
   @@index([roomId, position])
   @@map("room_queue_items")
+}
+
+model RoomFavorite {
+  userId    String   @map("user_id") @db.Uuid
+  roomId    String   @map("room_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roomId])
+  @@index([userId, createdAt])
+  @@index([roomId])
+  @@map("room_favorites")
 }

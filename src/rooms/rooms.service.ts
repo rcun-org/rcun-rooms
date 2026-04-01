@@ -85,6 +85,70 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     return rooms.map(this.toResponse);
   }
 
+  async findFavorites(userId: string) {
+    await this.cleanupExpiredDrafts();
+
+    const favorites = await this.prisma.roomFavorite.findMany({
+      where: {
+        userId,
+        room: {
+          lifecycleStatus: 'ready',
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        room: {
+          include: { members: true },
+        },
+      },
+    });
+
+    return favorites.map((favorite) => this.toResponse(favorite.room));
+  }
+
+  async addFavorite(roomId: string, userId: string) {
+    await this.cleanupExpiredDrafts();
+
+    const room = await this.prisma.room.findFirst({
+      where: {
+        id: roomId,
+        lifecycleStatus: 'ready',
+      },
+      include: { members: true },
+    });
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+
+    await this.prisma.roomFavorite.upsert({
+      where: {
+        userId_roomId: {
+          userId,
+          roomId,
+        },
+      },
+      create: {
+        userId,
+        roomId,
+      },
+      update: {},
+    });
+
+    return this.toResponse(room);
+  }
+
+  async removeFavorite(roomId: string, userId: string) {
+    await this.cleanupExpiredDrafts();
+
+    await this.prisma.roomFavorite.deleteMany({
+      where: {
+        userId,
+        roomId,
+      },
+    });
+  }
+
   async findById(id: string) {
     await this.cleanupExpiredDrafts();
 

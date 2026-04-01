@@ -1,4 +1,8 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { RoomsService } from './rooms.service';
 
@@ -9,6 +13,7 @@ describe('RoomsService', () => {
     room: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
@@ -31,6 +36,11 @@ describe('RoomsService', () => {
     },
     roomShareLink: {
       findUnique: jest.fn(),
+    },
+    roomFavorite: {
+      findMany: jest.fn(),
+      upsert: jest.fn(),
+      deleteMany: jest.fn(),
     },
   };
 
@@ -101,6 +111,98 @@ describe('RoomsService', () => {
         members: [],
       }),
     ]);
+  });
+
+  it('returns ready favorite rooms for a user', async () => {
+    prisma.roomFavorite.findMany.mockResolvedValue([
+      {
+        userId: room.ownerId,
+        roomId: room.id,
+        createdAt: new Date('2024-02-07T00:04:00.000Z'),
+        room,
+      },
+    ]);
+
+    const result = await service.findFavorites(room.ownerId);
+
+    expect(prisma.roomFavorite.findMany).toHaveBeenCalledWith({
+      where: {
+        userId: room.ownerId,
+        room: {
+          lifecycleStatus: 'ready',
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        room: {
+          include: { members: true },
+        },
+      },
+    });
+    expect(result).toEqual([
+      expect.objectContaining({
+        id: room.id,
+        ownerId: room.ownerId,
+      }),
+    ]);
+  });
+
+  it('adds a ready room to user favorites', async () => {
+    prisma.room.findFirst.mockResolvedValue(room);
+    prisma.roomFavorite.upsert.mockResolvedValue({
+      userId: room.ownerId,
+      roomId: room.id,
+      createdAt: new Date('2024-02-07T00:04:00.000Z'),
+    });
+
+    await expect(service.addFavorite(room.id, room.ownerId)).resolves.toEqual(
+      expect.objectContaining({
+        id: room.id,
+        ownerId: room.ownerId,
+      }),
+    );
+
+    expect(prisma.room.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: room.id,
+        lifecycleStatus: 'ready',
+      },
+      include: { members: true },
+    });
+    expect(prisma.roomFavorite.upsert).toHaveBeenCalledWith({
+      where: {
+        userId_roomId: {
+          userId: room.ownerId,
+          roomId: room.id,
+        },
+      },
+      create: {
+        userId: room.ownerId,
+        roomId: room.id,
+      },
+      update: {},
+    });
+  });
+
+  it('throws when favoriting a missing room', async () => {
+    prisma.room.findFirst.mockResolvedValue(null);
+
+    await expect(service.addFavorite(room.id, room.ownerId)).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+
+  it('removes a room from user favorites idempotently', async () => {
+    prisma.roomFavorite.deleteMany.mockResolvedValue({ count: 1 });
+
+    await service.removeFavorite(room.id, room.ownerId);
+
+    expect(prisma.roomFavorite.deleteMany).toHaveBeenCalledWith({
+      where: {
+        userId: room.ownerId,
+        roomId: room.id,
+      },
+    });
   });
 
   it('returns room members with roles in the room response', async () => {
@@ -199,6 +301,18 @@ describe('RoomsService', () => {
           }),
         ],
       }),
+    );
+  });
+
+  it('rejects private room creation without a password', async () => {
+    await expect(
+      service.create(room.ownerId, {
+        accessMode: 'private',
+        title: room.title,
+        videoUrl: room.backupVideo,
+      }),
+    ).rejects.toThrow(
+      new BadRequestException('Private rooms require a password'),
     );
   });
 
@@ -305,6 +419,7 @@ describe('RoomsService', () => {
     expect(lockedPreview).toEqual(
       expect.objectContaining({
         accessMode: 'private',
+        hasPassword: true,
         requiresPassword: true,
         shareHash: room.shareHash,
         title: room.title,
@@ -448,17 +563,19 @@ describe('RoomsService', () => {
     prisma.roomQueueItem.delete.mockResolvedValue(queueItem);
     prisma.roomQueueItem.findMany.mockResolvedValue([]);
 
-    await expect(service.skipQueueItem(room.id, room.ownerId)).resolves.toEqual({
-      queue: [],
-      room: expect.objectContaining({
-        backupVideo: queueItem.videoUrl,
-        backupPlayerState: expect.objectContaining({
-          title: queueItem.title,
-          url: queueItem.videoUrl,
+    await expect(service.skipQueueItem(room.id, room.ownerId)).resolves.toEqual(
+      {
+        queue: [],
+        room: expect.objectContaining({
+          backupVideo: queueItem.videoUrl,
+          backupPlayerState: expect.objectContaining({
+            title: queueItem.title,
+            url: queueItem.videoUrl,
+          }),
         }),
-      }),
-      skippedItem: queueItem,
-    });
+        skippedItem: queueItem,
+      },
+    );
 
     expect(prisma.roomQueueItem.delete).toHaveBeenCalledWith({
       where: { id: queueItem.id },
