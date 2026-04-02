@@ -26,6 +26,11 @@ import { AddQueueItemDto } from './dto/add-queue-item.dto';
 import { VerifyRoomAccessDto } from './dto/verify-room-access.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
+type QueueSkipGuardBody = {
+  expectedCurrentVideoUrl?: string;
+  expectedQueueItemId?: string;
+};
+
 @ApiTags('rooms')
 @Controller('rooms')
 export class RoomsController {
@@ -138,11 +143,13 @@ export class RoomsController {
     @Param('hash') hash: string,
     @Req() req: { user: { userId: string } },
     @Headers('x-room-access-token') accessToken?: string,
+    @Body() guard?: QueueSkipGuardBody,
   ) {
     return this.roomsService.skipQueueItemByShareHash(
       hash,
       req.user.userId,
       accessToken,
+      guard,
     );
   }
 
@@ -230,8 +237,12 @@ export class RoomsController {
   @ApiResponse({ status: 201, description: 'Next queued video selected' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Room not found' })
-  skipQueue(@Param('id') id: string, @Req() req: { user: { userId: string } }) {
-    return this.roomsService.skipQueueItem(id, req.user.userId);
+  skipQueue(
+    @Param('id') id: string,
+    @Req() req: { user: { userId: string } },
+    @Body() guard?: QueueSkipGuardBody,
+  ) {
+    return this.roomsService.skipQueueItem(id, req.user.userId, guard);
   }
 
   @Post(':id/favorite')

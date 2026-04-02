@@ -560,6 +560,7 @@ describe('RoomsService', () => {
       createdById: room.ownerId,
       createdAt: new Date('2024-02-07T00:00:00.000Z'),
     };
+    prisma.room.findUnique.mockResolvedValue(room);
     prisma.roomMember.findUnique.mockResolvedValue({ role: 'owner' });
     prisma.roomQueueItem.findFirst.mockResolvedValue(queueItem);
     prisma.room.update.mockResolvedValue({
@@ -595,6 +596,41 @@ describe('RoomsService', () => {
     });
   });
 
+  it('ignores stale guarded queue skip requests', async () => {
+    const queueItem = {
+      id: '990e8400-e29b-41d4-a716-446655440000',
+      roomId: room.id,
+      title: 'Next movie',
+      videoUrl: 'https://example.com/next',
+      poster: '',
+      kind: 'Long',
+      duration: '2h',
+      position: 1,
+      createdById: room.ownerId,
+      createdAt: new Date('2024-02-07T00:00:00.000Z'),
+    };
+    prisma.room.findUnique.mockResolvedValue(room);
+    prisma.roomMember.findUnique.mockResolvedValue({ role: 'owner' });
+    prisma.roomQueueItem.findMany.mockResolvedValue([queueItem]);
+
+    await expect(
+      service.skipQueueItem(room.id, room.ownerId, {
+        expectedCurrentVideoUrl: 'https://example.com/already-ended',
+        expectedQueueItemId: queueItem.id,
+      }),
+    ).resolves.toEqual({
+      queue: [queueItem],
+      room: expect.objectContaining({
+        backupVideo: room.backupVideo,
+      }),
+      skippedItem: null,
+    });
+
+    expect(prisma.roomQueueItem.findFirst).not.toHaveBeenCalled();
+    expect(prisma.room.update).not.toHaveBeenCalled();
+    expect(prisma.roomQueueItem.delete).not.toHaveBeenCalled();
+  });
+
   it('blocks queue updates from regular members', async () => {
     prisma.roomMember.findUnique.mockResolvedValue({ role: 'member' });
 
@@ -610,6 +646,7 @@ describe('RoomsService', () => {
   });
 
   it('blocks queue skipping from users outside host roles', async () => {
+    prisma.room.findUnique.mockResolvedValue(room);
     prisma.roomMember.findUnique.mockResolvedValue(null);
 
     await expect(

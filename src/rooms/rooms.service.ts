@@ -37,6 +37,11 @@ type RoomWithMembers = {
   }>;
 };
 
+type QueueSkipGuard = {
+  expectedCurrentVideoUrl?: string;
+  expectedQueueItemId?: string;
+};
+
 @Injectable()
 export class RoomsService implements OnModuleInit, OnModuleDestroy {
   private readonly draftLifetimeMs = 45 * 60 * 1000;
@@ -430,9 +435,20 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     return this.addQueueItem(room.id, userId, dto);
   }
 
-  async skipQueueItem(roomId: string, userId: string) {
-    await this.requireRoom(roomId);
+  async skipQueueItem(roomId: string, userId: string, guard?: QueueSkipGuard) {
+    const room = await this.findById(roomId);
     await this.requireQueueManager(roomId, userId);
+
+    if (
+      guard?.expectedCurrentVideoUrl &&
+      room.backupVideo !== guard.expectedCurrentVideoUrl
+    ) {
+      return {
+        queue: await this.listQueue(roomId),
+        room,
+        skippedItem: null,
+      };
+    }
 
     const nextItem = await this.prisma.roomQueueItem.findFirst({
       where: { roomId },
@@ -443,6 +459,14 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       return {
         queue: [],
         room: await this.findById(roomId),
+        skippedItem: null,
+      };
+    }
+
+    if (guard?.expectedQueueItemId && nextItem.id !== guard.expectedQueueItemId) {
+      return {
+        queue: await this.listQueue(roomId),
+        room,
         skippedItem: null,
       };
     }
@@ -478,9 +502,10 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     hash: string,
     userId: string,
     accessToken?: string,
+    guard?: QueueSkipGuard,
   ) {
     const room = await this.requireSharedRoomAccess(hash, accessToken);
-    return this.skipQueueItem(room.id, userId);
+    return this.skipQueueItem(room.id, userId, guard);
   }
 
   private async cleanupExpiredDrafts() {
