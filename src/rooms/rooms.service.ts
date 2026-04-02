@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   ForbiddenException,
@@ -68,7 +69,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       orderBy: { createdAt: 'desc' },
       include: { members: true },
     });
-    return rooms.map(this.toResponse);
+    return rooms.map((room) => this.toResponse(room));
   }
 
   async findMine(ownerId: string) {
@@ -82,7 +83,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       orderBy: { createdAt: 'desc' },
       include: { members: true },
     });
-    return rooms.map(this.toResponse);
+    return rooms.map((room) => this.toResponse(room));
   }
 
   async findFavorites(userId: string) {
@@ -178,7 +179,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     if (
       room.accessMode === 'private' &&
       !this.isPasswordDigestValid(
-        this.createPasswordDigest(dto.roomPassword ?? ''),
+        this.createPasswordDigest(dto.roomPassword),
         room.passwordDigest,
       )
     ) {
@@ -199,6 +200,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     const playerMode = dto.playerMode ?? 'youtube';
     const lifecycleStatus = dto.lifecycleStatus ?? 'ready';
     const passwordDigest = this.createPasswordDigest(dto.roomPassword);
+    this.requirePrivatePassword(dto.accessMode ?? 'public', passwordDigest);
     const shareHash = this.createShareHash(id, dto.title, passwordDigest);
 
     const room = await this.prisma.room.create({
@@ -259,10 +261,12 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     }
 
     const lifecycleStatus = dto.lifecycleStatus ?? room.lifecycleStatus;
+    const accessMode = dto.accessMode ?? room.accessMode;
     const passwordDigest =
       dto.roomPassword === undefined
         ? room.passwordDigest
         : this.createPasswordDigest(dto.roomPassword);
+    this.requirePrivatePassword(accessMode, passwordDigest);
     const shareHash = this.createShareHash(
       room.id,
       dto.title ?? room.title,
@@ -537,6 +541,15 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     return createHash('sha256').update(password).digest('hex');
   }
 
+  private requirePrivatePassword(accessMode: string, passwordDigest: string) {
+    if (
+      accessMode === 'private' &&
+      passwordDigest === this.createPasswordDigest('')
+    ) {
+      throw new BadRequestException('Private rooms require a password');
+    }
+  }
+
   private createRoomAccessToken(room: {
     passwordDigest: string;
     shareHash: string;
@@ -610,14 +623,13 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
 
   private toPrivateEntryResponse(room: RoomWithMembers) {
     return {
-      id: room.id,
-      _id: room.id,
       title: room.title,
       accessMode: room.accessMode,
       lifecycleStatus: room.lifecycleStatus,
       shareHash: room.shareHash,
       draftExpiresAt: room.draftExpiresAt,
       createdAt: room.createdAt,
+      hasPassword: room.passwordDigest !== this.createPasswordDigest(''),
       requiresPassword: true,
     };
   }
@@ -634,6 +646,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       backupPlayerState: room.backupPlayerState,
       backupChatHistory: room.backupChatHistory,
       accessMode: room.accessMode,
+      hasPassword: room.passwordDigest !== this.createPasswordDigest(''),
       lifecycleStatus: room.lifecycleStatus,
       shareHash: room.shareHash,
       draftExpiresAt: room.draftExpiresAt,

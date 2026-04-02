@@ -326,6 +326,19 @@ describe('RoomsService', () => {
     ).rejects.toThrow(ForbiddenException);
   });
 
+  it('rejects switching a room to private without a password', async () => {
+    prisma.room.findUnique.mockResolvedValue({
+      ...room,
+      passwordDigest: createHash('sha256').update('').digest('hex'),
+    });
+
+    await expect(
+      service.update(room.id, room.ownerId, {
+        accessMode: 'private',
+      }),
+    ).rejects.toThrow(new BadRequestException('Private rooms require a password'));
+  });
+
   it('throws when deleting a missing room', async () => {
     prisma.room.findUnique.mockResolvedValue(null);
 

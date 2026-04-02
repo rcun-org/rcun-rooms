@@ -1,10 +1,10 @@
-import { IsOptional, IsString, MaxLength } from 'class-validator';
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { IsString, MaxLength, MinLength } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
 
 export class VerifyRoomAccessDto {
-  @ApiPropertyOptional({ description: 'Room password', maxLength: 32 })
+  @ApiProperty({ description: 'Room password', minLength: 1, maxLength: 32 })
   @IsString()
+  @MinLength(1, { message: 'Password is required' })
   @MaxLength(32, { message: 'Password must be at most 32 characters' })
-  @IsOptional()
-  roomPassword?: string;
+  roomPassword: string;
 }
