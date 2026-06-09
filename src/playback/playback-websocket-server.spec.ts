@@ -51,6 +51,26 @@ function getSentMessages(client: TestClient) {
   ) as SentEnvelope[];
 }
 
+function getSentMessagesByType(client: TestClient, type: string) {
+  return getSentMessages(client).filter((message) => message.type === type);
+}
+
+function createQueueItem(overrides: Record<string, unknown> = {}) {
+  return {
+    createdAt: '2026-03-30T19:35:00.000Z',
+    createdById: 'user-1',
+    duration: 'Queued',
+    id: 'queue-item-1',
+    kind: 'Long',
+    position: 1,
+    poster: '',
+    roomId: 'room-uuid',
+    title: 'Queued video',
+    videoUrl: 'https://www.youtube.com/watch?v=queue',
+    ...overrides,
+  };
+}
+
 describe('PlaybackWebSocketServer', () => {
   let httpServer: Server;
   let playbackServer: PlaybackWebSocketServer;
@@ -298,5 +318,153 @@ describe('PlaybackWebSocketServer', () => {
     ]);
 
     dateNow.mockRestore();
+  });
+
+  it('keeps only the latest queue update for replay during rapid queue races', () => {
+    const sender = createClient({ id: 'first', roomId: 'movie-night' });
+    const lateJoiner = createClient();
+    (playbackServer as never as { clients: Set<TestClient> }).clients.add(
+      sender,
+    );
+    (playbackServer as never as { clients: Set<TestClient> }).clients.add(
+      lateJoiner,
+    );
+
+    const queueUpdateHandler = (
+      playbackServer as never as {
+        handleQueueUpdateRequest: (
+          client: TestClient,
+          data: Record<string, unknown>,
+        ) => void;
+      }
+    ).handleQueueUpdateRequest.bind(playbackServer);
+
+    queueUpdateHandler(sender, {
+      queue: [
+        createQueueItem({
+          id: 'queue-item-stale',
+          title: 'Stale queue item',
+          videoUrl: 'https://www.youtube.com/watch?v=stale',
+        }),
+      ],
+    });
+    queueUpdateHandler(sender, {
+      queue: [
+        createQueueItem({
+          id: 'queue-item-latest',
+          title: 'Latest queue item',
+          videoUrl: 'https://www.youtube.com/watch?v=latest',
+        }),
+      ],
+    });
+
+    (
+      playbackServer as never as {
+        handleHello: (
+          client: TestClient,
+          data: Record<string, unknown>,
+        ) => void;
+      }
+    ).handleHello(lateJoiner, {
+      clientId: 'late',
+      roomId: 'movie-night',
+    });
+
+    const queueReplays = getSentMessagesByType(
+      lateJoiner,
+      'queue_update_broadcast',
+    );
+
+    expect(queueReplays).toHaveLength(1);
+    expect(queueReplays[0]).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          queue: [
+            expect.objectContaining({
+              id: 'queue-item-latest',
+              title: 'Latest queue item',
+            }),
+          ],
+          senderId: 'first',
+        }),
+        roomId: 'movie-night',
+        targetId: 'late',
+      }),
+    );
+    expect(JSON.stringify(queueReplays[0])).not.toContain('queue-item-stale');
+  });
+
+  it('replays a missed queue update when a room client reconnects', () => {
+    const sender = createClient({ id: 'first', roomId: 'movie-night' });
+    const disconnectedReceiver = createClient({
+      id: 'receiver',
+      roomId: 'movie-night',
+    });
+    const reconnectedReceiver = createClient();
+    (playbackServer as never as { clients: Set<TestClient> }).clients.add(
+      sender,
+    );
+    (playbackServer as never as { clients: Set<TestClient> }).clients.add(
+      disconnectedReceiver,
+    );
+
+    (
+      playbackServer as never as {
+        disconnect: (client: TestClient) => void;
+      }
+    ).disconnect(disconnectedReceiver);
+
+    (
+      playbackServer as never as {
+        handleQueueUpdateRequest: (
+          client: TestClient,
+          data: Record<string, unknown>,
+        ) => void;
+      }
+    ).handleQueueUpdateRequest(sender, {
+      queue: [
+        createQueueItem({
+          id: 'queue-item-missed',
+          title: 'Missed while offline',
+          videoUrl: 'https://www.youtube.com/watch?v=missed',
+        }),
+      ],
+    });
+
+    (playbackServer as never as { clients: Set<TestClient> }).clients.add(
+      reconnectedReceiver,
+    );
+    (
+      playbackServer as never as {
+        handleHello: (
+          client: TestClient,
+          data: Record<string, unknown>,
+        ) => void;
+      }
+    ).handleHello(reconnectedReceiver, {
+      clientId: 'receiver',
+      roomId: 'movie-night',
+    });
+
+    expect(
+      getSentMessagesByType(disconnectedReceiver, 'queue_update_broadcast'),
+    ).toHaveLength(0);
+    expect(
+      getSentMessagesByType(reconnectedReceiver, 'queue_update_broadcast'),
+    ).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          queue: [
+            expect.objectContaining({
+              id: 'queue-item-missed',
+              title: 'Missed while offline',
+            }),
+          ],
+          senderId: 'first',
+        }),
+        roomId: 'movie-night',
+        targetId: 'receiver',
+      }),
+    ]);
   });
 });

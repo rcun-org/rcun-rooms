@@ -463,7 +463,10 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       };
     }
 
-    if (guard?.expectedQueueItemId && nextItem.id !== guard.expectedQueueItemId) {
+    if (
+      guard?.expectedQueueItemId &&
+      nextItem.id !== guard.expectedQueueItemId
+    ) {
       return {
         queue: await this.listQueue(roomId),
         room,

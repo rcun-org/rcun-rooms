@@ -336,7 +336,9 @@ describe('RoomsService', () => {
       service.update(room.id, room.ownerId, {
         accessMode: 'private',
       }),
-    ).rejects.toThrow(new BadRequestException('Private rooms require a password'));
+    ).rejects.toThrow(
+      new BadRequestException('Private rooms require a password'),
+    );
   });
 
   it('throws when deleting a missing room', async () => {
