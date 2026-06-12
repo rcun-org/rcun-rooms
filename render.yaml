@@ -18,5 +18,7 @@ services:
         sync: false
       - key: AUTH_JWT_SECRET
         sync: false
+      - key: CORS_ORIGIN
+        value: https://bubble-web.onrender.com
 
     healthCheckPath: /rooms/health/liveness

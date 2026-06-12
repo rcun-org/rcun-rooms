@@ -4,6 +4,15 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { attachPlaybackWebSocketServer } from './playback/playback-websocket-server';
 
+function parseCorsOrigins(value: string | undefined, fallback: string[]) {
+  const origins = value
+    ?.split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  return origins?.length ? origins : fallback;
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
@@ -15,7 +24,10 @@ async function bootstrap() {
     }),
   );
 
-  const corsOrigin = process.env.CORS_ORIGIN?.split(',') || '*';
+  const corsOrigin = parseCorsOrigins(process.env.CORS_ORIGIN, [
+    'http://localhost:3005',
+    'http://127.0.0.1:3005',
+  ]);
   app.enableCors({
     origin: corsOrigin,
     credentials: true,
